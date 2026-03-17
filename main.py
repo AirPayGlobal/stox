@@ -26,6 +26,7 @@ from trading.alpaca_client import (
     place_bracket_order,
     close_position,
     close_all_positions,
+    validate_credentials,
 )
 from trading.risk_manager import RiskManager
 from trading.portfolio import Portfolio
@@ -266,6 +267,12 @@ def main() -> None:
             "\nERROR: Alpaca API keys not set.\n"
             "Copy .env.example to .env and add your keys from https://alpaca.markets\n"
         )
+        sys.exit(1)
+
+    ok, msg = validate_credentials()
+    if not ok:
+        print(f"\nERROR: Alpaca authentication failed — {msg}")
+        print("Run:  python check_auth.py  for a full diagnostic.\n")
         sys.exit(1)
 
     bot = TradingBot(dry_run=args.dry_run)

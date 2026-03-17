@@ -13,6 +13,7 @@ from alpaca.trading.requests import (
     TakeProfitRequest,
 )
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
+from alpaca.common.exceptions import APIError
 
 from config import Config
 from utils.logger import get_logger
@@ -31,6 +32,28 @@ def get_trading_client() -> TradingClient:
             paper=(Config.ALPACA_MODE == "paper"),
         )
     return _trading_client
+
+
+def validate_credentials() -> tuple[bool, str]:
+    """
+    Test that the configured API key/secret are accepted by Alpaca.
+    Returns (True, summary) on success or (False, error_message) on failure.
+    Call this once on bot startup before entering the trading loop.
+    """
+    try:
+        account = get_trading_client().get_account()
+        equity = float(account.equity)
+        return True, f"equity=${equity:,.2f} account_id={account.id}"
+    except APIError as exc:
+        if exc.status_code in (401, 403):
+            return False, (
+                "Invalid API key or secret (HTTP 403). "
+                "Check ALPACA_API_KEY / ALPACA_API_SECRET in your .env file. "
+                "Make sure you are using Paper keys when ALPACA_MODE=paper."
+            )
+        return False, f"Alpaca API error (HTTP {exc.status_code}): {exc}"
+    except Exception as exc:
+        return False, f"Connection error: {exc}"
 
 
 def get_account() -> dict:
