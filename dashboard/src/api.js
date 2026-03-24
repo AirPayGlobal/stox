@@ -1,0 +1,35 @@
+import axios from 'axios'
+
+let client = null
+
+export function initClient(username, password) {
+  client = axios.create({ auth: { username, password } })
+}
+
+export async function fetchAll() {
+  const [account, positions, trades, summary, equityCurve, botStatus] =
+    await Promise.all([
+      client.get('/api/account'),
+      client.get('/api/positions'),
+      client.get('/api/trades'),
+      client.get('/api/summary'),
+      client.get('/api/equity-curve'),
+      client.get('/api/bot/status'),
+    ])
+  return {
+    account: account.data,
+    positions: positions.data,
+    trades: trades.data.trades,
+    summary: summary.data,
+    equityCurve: equityCurve.data.snapshots,
+    botStatus: botStatus.data,
+  }
+}
+
+export async function startBot(dryRun = false) {
+  return client.post(`/api/bot/start?dry_run=${dryRun}`)
+}
+
+export async function stopBot() {
+  return client.post('/api/bot/stop')
+}
