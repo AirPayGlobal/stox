@@ -31,19 +31,16 @@ class BotManager:
             if self._thread and self._thread.is_alive():
                 return {"ok": False, "message": "Bot is already running"}
 
-            # Clear any leftover scheduled jobs from a previous run
             schedule.clear()
-
             self.dry_run = dry_run
             self.status = "starting"
             self.started_at = datetime.utcnow().isoformat()
             self.error_msg = None
 
-            from main import TradingBot
-            self._bot = TradingBot(dry_run=dry_run)
-
             def _run() -> None:
                 try:
+                    from main import TradingBot
+                    self._bot = TradingBot(dry_run=dry_run)
                     self.status = "running"
                     self._bot.start()
                 except Exception as exc:

@@ -107,7 +107,10 @@ def bot_status(_: str = Depends(verify)) -> dict[str, Any]:
 
 @app.post("/api/bot/start")
 def bot_start(dry_run: bool = False, _: str = Depends(verify)) -> dict[str, Any]:
-    return bot_manager.start(dry_run=dry_run)
+    try:
+        return bot_manager.start(dry_run=dry_run)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/bot/stop")
