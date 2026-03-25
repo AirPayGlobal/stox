@@ -123,8 +123,6 @@ class TradingBot:
             if sig == Signal.BUY and sym not in open_symbols
         ]
 
-        logger.info(f"All signals: {[(s, sig.value, sc) for s, sig, sc in candidates]}")
-        logger.info(f"Open symbols: {open_symbols}")
         logger.info(f"Buy candidates: {len(buy_candidates)}")
 
         for symbol, signal, score in buy_candidates:
