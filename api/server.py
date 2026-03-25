@@ -118,6 +118,19 @@ def bot_stop(_: str = Depends(verify)) -> dict[str, Any]:
     return bot_manager.stop()
 
 
+@app.get("/api/logs")
+def get_logs(_: str = Depends(verify), lines: int = 100) -> dict[str, Any]:
+    from datetime import datetime
+    from pathlib import Path
+    log_dir = Path(__file__).parent.parent / "logs"
+    log_file = log_dir / f"{datetime.now():%Y-%m-%d}.log"
+    if not log_file.exists():
+        return {"lines": []}
+    with open(log_file) as f:
+        all_lines = f.readlines()
+    return {"lines": [l.rstrip() for l in all_lines[-lines:]]}
+
+
 # ------------------------------------------------------------------ SPA
 
 _DIST = Path(__file__).parent.parent / "dashboard" / "dist"

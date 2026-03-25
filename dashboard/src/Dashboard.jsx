@@ -1,9 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot } from './api.js'
+import { startBot, stopBot, fetchLogs } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -313,6 +313,50 @@ function TradesTable({ trades }) {
 
 // ------------------------------------------------------------------ Dashboard
 
+// ------------------------------------------------------------------ LogViewer
+
+function LogViewer() {
+  const [logs, setLogs] = useState([])
+  const [open, setOpen] = useState(true)
+  const bottomRef = useRef(null)
+
+  useEffect(() => {
+    const load = () => fetchLogs(150).then(r => setLogs(r.data.lines)).catch(() => {})
+    load()
+    const id = setInterval(load, 10_000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs, open])
+
+  return (
+    <div className="log-viewer">
+      <div className="log-header" onClick={() => setOpen(o => !o)}>
+        <span>Bot Logs</span>
+        <span className="log-toggle">{open ? '▲' : '▼'}</span>
+      </div>
+      {open && (
+        <div className="log-body">
+          {logs.length === 0
+            ? <span className="log-empty">No logs yet.</span>
+            : logs.map((line, i) => {
+                const level = line.includes('| ERROR') ? 'log-error'
+                  : line.includes('| WARNING') ? 'log-warn'
+                  : line.includes('| INFO') ? 'log-info'
+                  : 'log-debug'
+                return <div key={i} className={`log-line ${level}`}>{line}</div>
+              })
+          }
+          <div ref={bottomRef} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+
 export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
   const { account, positions, trades, summary, equityCurve, botStatus } = data
   const [toggleLoading, setToggleLoading] = useState(false)
@@ -358,6 +402,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
           <PositionsTable positions={positions} />
           <TradesTable trades={trades.slice(0, 20)} />
         </div>
+        <LogViewer />
       </main>
 
       <footer className="footer">

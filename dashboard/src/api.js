@@ -34,3 +34,7 @@ export async function startBot(dryRun = false) {
 export async function stopBot() {
   return client.post('/api/bot/stop')
 }
+
+export async function fetchLogs(lines = 100) {
+  return client.get(`/api/logs?lines=${lines}`)
+}
