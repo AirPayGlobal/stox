@@ -3,7 +3,8 @@ import axios from 'axios'
 let client = null
 
 export function initClient(username, password) {
-  client = axios.create({ auth: { username, password } })
+  const token = btoa(`${username}:${password}`)
+  client = axios.create({ headers: { Authorization: `Bearer ${token}` } })
 }
 
 export async function fetchAll() {

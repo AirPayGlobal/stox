@@ -13,9 +13,8 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
 
 from api.bot_manager import bot_manager
@@ -27,29 +26,30 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 app = FastAPI(title="STOX Dashboard", docs_url=None, redoc_url=None)
-security = HTTPBasic(auto_error=False)
 
 _DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
 
 
 # ------------------------------------------------------------------ Auth
+# Uses Bearer token (base64 user:pass) to avoid browser intercepting 401s
 
-def verify(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    if credentials is None:
+import base64
+
+def verify(request: Request) -> str:
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    ok_user = secrets.compare_digest(
-        credentials.username.encode(), _DASHBOARD_USER.encode()
-    )
-    ok_pass = secrets.compare_digest(
-        credentials.password.encode(), _DASHBOARD_PASS.encode()
-    )
+    try:
+        decoded = base64.b64decode(auth[7:]).decode()
+        username, password = decoded.split(":", 1)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    ok_user = secrets.compare_digest(username.encode(), _DASHBOARD_USER.encode())
+    ok_pass = secrets.compare_digest(password.encode(), _DASHBOARD_PASS.encode())
     if not (ok_user and ok_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
-    return credentials.username
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    return username
 
 
 # ------------------------------------------------------------------ API
