@@ -27,7 +27,7 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 app = FastAPI(title="STOX Dashboard", docs_url=None, redoc_url=None)
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
 
 _DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
@@ -36,6 +36,8 @@ _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
 # ------------------------------------------------------------------ Auth
 
 def verify(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     ok_user = secrets.compare_digest(
         credentials.username.encode(), _DASHBOARD_USER.encode()
     )
@@ -46,7 +48,6 @@ def verify(credentials: HTTPBasicCredentials = Depends(security)) -> str:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
-            headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
 
