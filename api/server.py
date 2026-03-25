@@ -38,13 +38,20 @@ import base64
 
 def verify(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
-    if not auth.startswith("Bearer "):
+    if auth.startswith("Bearer "):
+        try:
+            decoded = base64.b64decode(auth[7:]).decode()
+            username, password = decoded.split(":", 1)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    elif auth.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(auth[6:]).decode()
+            username, password = decoded.split(":", 1)
+        except Exception:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    else:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    try:
-        decoded = base64.b64decode(auth[7:]).decode()
-        username, password = decoded.split(":", 1)
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     ok_user = secrets.compare_digest(username.encode(), _DASHBOARD_USER.encode())
     ok_pass = secrets.compare_digest(password.encode(), _DASHBOARD_PASS.encode())
     if not (ok_user and ok_pass):
@@ -119,7 +126,7 @@ if _DIST.exists():
         app.mount("/assets", StaticFiles(directory=str(_assets)), name="assets")
 
     @app.get("/{full_path:path}")
-    def spa(full_path: str, _: str = Depends(verify)) -> FileResponse:
+    def spa(full_path: str) -> FileResponse:
         """Serve the React SPA for all non-API routes."""
         return FileResponse(str(_DIST / "index.html"))
 else:
