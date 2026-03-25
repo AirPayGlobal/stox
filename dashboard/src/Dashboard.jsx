@@ -345,9 +345,9 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
         onRefresh={onRefresh}
       />
 
-      {(botMsg || refreshError) && (
-        <div className={`banner ${refreshError ? 'banner-error' : 'banner-info'}`}>
-          {refreshError || botMsg}
+      {(botMsg || refreshError || (botStatus?.status === 'error' && botStatus?.error)) && (
+        <div className={`banner ${refreshError || botStatus?.status === 'error' ? 'banner-error' : 'banner-info'}`}>
+          {refreshError || botMsg || `Bot error: ${botStatus?.error}`}
         </div>
       )}
 
