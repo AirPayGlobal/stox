@@ -138,6 +138,16 @@ def cancel_all_orders() -> None:
     logger.info("Cancelled all open orders.")
 
 
+def get_pending_symbols() -> set[str]:
+    """Return set of symbols with open/pending orders."""
+    try:
+        orders = get_trading_client().get_orders()
+        return {o.symbol for o in orders if o.status in ("new", "partially_filled", "accepted", "pending_new")}
+    except Exception as exc:
+        logger.error(f"Failed to fetch pending orders: {exc}")
+        return set()
+
+
 def is_market_open() -> bool:
     """Check if the US stock market is currently open."""
     clock = get_trading_client().get_clock()

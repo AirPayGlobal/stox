@@ -153,6 +153,7 @@ class Portfolio:
         )
         self.snapshots.append(snap)
         self.save()
+        logger.info(f"Snapshot: equity=${equity:,.2f} cash=${cash:,.2f} positions={open_positions}")
 
     def summary(self) -> dict:
         closed = [t for t in self.trades if t.status != "OPEN"]

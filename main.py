@@ -22,6 +22,7 @@ from analysis.signals import screen_universe, Signal
 from trading.alpaca_client import (
     get_account,
     get_positions,
+    get_pending_symbols,
     is_market_open,
     place_bracket_order,
     close_position,
@@ -99,7 +100,8 @@ class TradingBot:
             return
 
         open_positions = get_positions()
-        open_symbols = set(open_positions.keys())
+        pending_symbols = get_pending_symbols()
+        open_symbols = set(open_positions.keys()) | pending_symbols
 
         # Check exits first
         self._check_exits(open_positions, equity)
@@ -113,7 +115,7 @@ class TradingBot:
 
         # Fetch latest data for watchlist
         logger.info(f"Scanning {len(Config.WATCHLIST)} symbols...")
-        data = fetch_batch(Config.WATCHLIST, lookback_days=200)
+        data = fetch_batch(Config.WATCHLIST, lookback_days=100)
 
         # Screen for signals
         candidates = screen_universe(data)
@@ -186,7 +188,7 @@ class TradingBot:
         from data.fetcher import fetch_bars
         for symbol, pos in open_positions.items():
             try:
-                df = fetch_bars(symbol, lookback_days=200)
+                df = fetch_bars(symbol, lookback_days=100)
                 if df.empty:
                     continue
                 signal, score = self.strategy.generate_signal(df)
@@ -229,8 +231,8 @@ class TradingBot:
         schedule.every().thursday.at("13:31").do(self.morning_setup)
         schedule.every().friday.at("13:31").do(self.morning_setup)
 
-        # Scan every 30 minutes during market hours (9:45 AM – 3:30 PM ET)
-        schedule.every(30).minutes.do(self.scan_and_trade)
+        # Scan every 10 minutes during market hours
+        schedule.every(10).minutes.do(self.scan_and_trade)
 
         # End-of-day summary at 4:05 PM ET
         schedule.every().monday.at("20:05").do(self.eod_summary)

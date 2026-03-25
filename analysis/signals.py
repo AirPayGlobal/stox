@@ -24,8 +24,8 @@ class Signal(str, Enum):
     HOLD = "HOLD"
 
 
-BUY_THRESHOLD = 60    # score out of 100 required to issue a BUY
-SELL_THRESHOLD = 60   # score required to issue a SELL
+BUY_THRESHOLD = 50    # score out of 100 required to issue a BUY
+SELL_THRESHOLD = 55   # score required to issue a SELL (sell should be more decisive)
 
 
 def _score_buy(row: pd.Series, prev: pd.Series) -> int:
@@ -52,14 +52,18 @@ def _score_buy(row: pd.Series, prev: pd.Series) -> int:
     if row["macd_hist"] > 0 and prev["macd_hist"] <= 0:
         score += 15
     elif row["macd_hist"] > 0:
-        score += 7
+        score += 12
 
-    # 6. Price near/below Bollinger mid-band — room to run upward (10 pts)
-    if row["bb_pct"] < 0.55:
+    # 6. Price near/below Bollinger lower half — room to run upward (10 pts)
+    if row["bb_pct"] < 0.3:
         score += 10
+    elif row["bb_pct"] < 0.5:
+        score += 5
 
-    # 7. Above-average volume — institutional participation (5 pts)
-    if row["volume"] > row["volume_sma"] * 1.1:
+    # 7. Above-average volume — institutional participation (10 pts)
+    if row["volume"] > row["volume_sma"] * 1.25:
+        score += 10
+    elif row["volume"] > row["volume_sma"] * 1.1:
         score += 5
 
     return min(score, 100)

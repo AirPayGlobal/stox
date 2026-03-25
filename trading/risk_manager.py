@@ -81,8 +81,16 @@ class RiskManager:
         shares = int(min(shares_by_risk, max_shares_by_pct))
         shares = max(shares, 1)  # always trade at least 1 share
 
+        # Ensure stop_distance is sane (at least 0.1% of price)
+        stop_distance = max(stop_distance, price * 0.001)
         stop_loss = price - stop_distance
         take_profit = price + (stop_distance * 3)  # 3:1 R:R
+
+        # Validate
+        if stop_loss <= 0 or stop_loss >= price or take_profit <= price:
+            logger.warning(f"Invalid SL/TP: price={price} SL={stop_loss} TP={take_profit}")
+            stop_loss = price * 0.98
+            take_profit = price * 1.06
 
         logger.debug(
             f"Sizing: equity={equity:.0f} price={price:.2f} atr={atr:.2f} "

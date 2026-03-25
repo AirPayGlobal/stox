@@ -87,7 +87,7 @@ def fetch_batch(
     symbols: list[str],
     timeframe: TimeFrame = TimeFrame.Day,
     lookback_days: int = 200,
-    delay: float = 0.2,
+    delay: float = 0.1,
 ) -> dict[str, pd.DataFrame]:
     """
     Fetch bars for multiple symbols with a small inter-request delay

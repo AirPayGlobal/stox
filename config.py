@@ -33,8 +33,8 @@ class Config:
     EMA_SLOW: int = 21
     EMA_TREND: int = 50
     RSI_PERIOD: int = 14
-    RSI_OVERSOLD: float = 40.0
-    RSI_OVERBOUGHT: float = 65.0
+    RSI_OVERSOLD: float = 30.0
+    RSI_OVERBOUGHT: float = 75.0
     MACD_FAST: int = 12
     MACD_SLOW: int = 26
     MACD_SIGNAL: int = 9
