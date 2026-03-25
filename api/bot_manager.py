@@ -85,3 +85,6 @@ class BotManager:
 
 # Module-level singleton shared by the FastAPI app
 bot_manager = BotManager()
+
+# Auto-start bot on container startup
+bot_manager.start(dry_run=False)
