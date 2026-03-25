@@ -1,11 +1,13 @@
 """
-Technical indicator calculations using pandas-ta.
+Technical indicator calculations using the `ta` library.
 All functions accept and return DataFrames to keep pipelines clean.
 """
 from __future__ import annotations
 
 import pandas as pd
-import pandas_ta as ta
+import ta.momentum
+import ta.trend
+import ta.volatility
 
 from config import Config
 
@@ -25,39 +27,41 @@ def add_all_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
 
     # Exponential moving averages
-    df["ema_fast"] = ta.ema(df["close"], length=Config.EMA_FAST)
-    df["ema_slow"] = ta.ema(df["close"], length=Config.EMA_SLOW)
-    df["ema_trend"] = ta.ema(df["close"], length=Config.EMA_TREND)
+    df["ema_fast"] = ta.trend.EMAIndicator(df["close"], window=Config.EMA_FAST).ema_indicator()
+    df["ema_slow"] = ta.trend.EMAIndicator(df["close"], window=Config.EMA_SLOW).ema_indicator()
+    df["ema_trend"] = ta.trend.EMAIndicator(df["close"], window=Config.EMA_TREND).ema_indicator()
 
     # RSI
-    df["rsi"] = ta.rsi(df["close"], length=Config.RSI_PERIOD)
+    df["rsi"] = ta.momentum.RSIIndicator(df["close"], window=Config.RSI_PERIOD).rsi()
 
     # MACD
-    macd = ta.macd(
+    macd_ind = ta.trend.MACD(
         df["close"],
-        fast=Config.MACD_FAST,
-        slow=Config.MACD_SLOW,
-        signal=Config.MACD_SIGNAL,
+        window_fast=Config.MACD_FAST,
+        window_slow=Config.MACD_SLOW,
+        window_sign=Config.MACD_SIGNAL,
     )
-    if macd is not None:
-        df["macd"] = macd[f"MACD_{Config.MACD_FAST}_{Config.MACD_SLOW}_{Config.MACD_SIGNAL}"]
-        df["macd_signal"] = macd[f"MACDs_{Config.MACD_FAST}_{Config.MACD_SLOW}_{Config.MACD_SIGNAL}"]
-        df["macd_hist"] = macd[f"MACDh_{Config.MACD_FAST}_{Config.MACD_SLOW}_{Config.MACD_SIGNAL}"]
+    df["macd"] = macd_ind.macd()
+    df["macd_signal"] = macd_ind.macd_signal()
+    df["macd_hist"] = macd_ind.macd_diff()
 
     # Bollinger Bands
-    bb = ta.bbands(df["close"], length=Config.BB_PERIOD, std=Config.BB_STD)
-    if bb is not None:
-        df["bb_lower"] = bb[f"BBL_{Config.BB_PERIOD}_{Config.BB_STD}"]
-        df["bb_mid"] = bb[f"BBM_{Config.BB_PERIOD}_{Config.BB_STD}"]
-        df["bb_upper"] = bb[f"BBU_{Config.BB_PERIOD}_{Config.BB_STD}"]
-        bb_range = df["bb_upper"] - df["bb_lower"]
-        df["bb_pct"] = (df["close"] - df["bb_lower"]) / bb_range.replace(0, float("nan"))
+    bb_ind = ta.volatility.BollingerBands(
+        df["close"], window=Config.BB_PERIOD, window_dev=Config.BB_STD
+    )
+    df["bb_upper"] = bb_ind.bollinger_hband()
+    df["bb_mid"] = bb_ind.bollinger_mavg()
+    df["bb_lower"] = bb_ind.bollinger_lband()
+    bb_range = df["bb_upper"] - df["bb_lower"]
+    df["bb_pct"] = (df["close"] - df["bb_lower"]) / bb_range.replace(0, float("nan"))
 
     # ATR (14-period) — used for volatility-adjusted stop-loss
-    df["atr"] = ta.atr(df["high"], df["low"], df["close"], length=14)
+    df["atr"] = ta.volatility.AverageTrueRange(
+        df["high"], df["low"], df["close"], window=14
+    ).average_true_range()
 
     # Volume SMA
-    df["volume_sma"] = ta.sma(df["volume"], length=20)
+    df["volume_sma"] = df["volume"].rolling(window=20).mean()
 
     return df
 
