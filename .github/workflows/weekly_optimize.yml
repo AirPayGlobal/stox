@@ -1,0 +1,56 @@
+name: Weekly Strategy Optimization
+
+on:
+  schedule:
+    - cron: '0 20 * * 0'  # Every Sunday at 20:00 UTC
+  workflow_dispatch:       # Allow manual trigger from GitHub Actions UI
+
+jobs:
+  optimize:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: claude/stock-trading-bot-QeUGQ
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r requirements.txt
+
+      - name: Run auto-optimization
+        id: optimize
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+          ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+          ALPACA_MODE: paper
+          INITIAL_CAPITAL: "100000.0"
+        run: |
+          python scripts/auto_optimize.py
+          echo "changed=$(git diff --name-only | wc -l | tr -d ' ')" >> $GITHUB_OUTPUT
+
+      - name: Commit and push improvements
+        if: steps.optimize.outputs.changed != '0'
+        run: |
+          git config user.name "stox-optimizer"
+          git config user.email "optimizer@stox.bot"
+          git add analysis/signals.py config.py
+          git commit -m "Weekly optimization: $(date -u '+%Y-%m-%d') - auto-tuned parameters
+
+          Automated parameter optimization via backtest verification.
+          Both Sharpe ratio and profit factor improved before deployment.
+          See scripts/auto_optimize.py for full logic."
+          git push origin claude/stock-trading-bot-QeUGQ
+
+      - name: No changes needed
+        if: steps.optimize.outputs.changed == '0'
+        run: echo "Strategy is healthy — no parameter changes needed this week."
