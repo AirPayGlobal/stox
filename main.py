@@ -32,6 +32,7 @@ from trading.alpaca_client import (
 from trading.risk_manager import RiskManager
 from trading.portfolio import Portfolio
 from strategy.ema_rsi_macd import EmaRsiMacdStrategy
+from analysis.market_filter import is_vix_too_high, is_sentiment_negative
 from utils.logger import get_logger
 
 logger = get_logger("main")
@@ -99,6 +100,11 @@ class TradingBot:
             logger.warning("Daily loss limit hit — no new trades today.")
             return
 
+        # VIX filter — skip all new entries during high-fear market conditions
+        if is_vix_too_high():
+            logger.warning("VIX filter active — no new BUY entries this scan.")
+            return
+
         open_positions = get_positions()
         pending_symbols = get_pending_symbols()
         open_symbols = set(open_positions.keys()) | pending_symbols
@@ -130,6 +136,10 @@ class TradingBot:
         for symbol, signal, score in buy_candidates:
             if self.risk.max_positions_reached(len(get_positions())):
                 break
+
+            # News sentiment filter — skip symbols with recent negative headlines
+            if is_sentiment_negative(symbol):
+                continue
 
             df = data[symbol]
             from analysis.indicators import add_all_indicators

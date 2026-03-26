@@ -50,5 +50,9 @@ class Config:
         "NKE", "PM", "LIN", "BMY", "RTX", "QCOM", "AMGN", "UPS", "SBUX",
     ]
 
+    # Market filters
+    VIX_THRESHOLD: float = float(os.getenv("VIX_THRESHOLD", "25"))   # skip buys when VIX > this
+    MIN_SENTIMENT_SCORE: float = float(os.getenv("MIN_SENTIMENT_SCORE", "-0.2"))  # skip if avg headline score < this
+
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
