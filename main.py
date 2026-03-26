@@ -269,29 +269,42 @@ class TradingBot:
             trade_count=port_summary.get("total_trades", 0),
         )
 
+        filter_stats = {"sector": 0, "weekly": 0, "sentiment": 0,
+                        "earnings": 0, "correlation": 0, "ml": 0, "passed": 0}
+
         for symbol, signal, score in buy_candidates:
             if self.risk.max_positions_reached(len(get_positions())):
                 break
 
             # Sector rotation — skip if sector not in top N by momentum
             if not is_in_top_sectors(symbol):
+                logger.debug(f"Filter SECTOR: {symbol} not in top-{Config.SECTOR_TOP_N} sectors")
+                filter_stats["sector"] += 1
                 continue
 
             # Multi-timeframe: weekly chart must confirm the daily BUY
-            if Config.WEEKLY_CONFIRM_REQUIRED:
+            # In BEAR regime, skip this filter — regime already cuts size to 50%
+            if Config.WEEKLY_CONFIRM_REQUIRED and regime.value != "BEAR":
                 if not weekly_confirms_entry(data[symbol], symbol):
+                    logger.info(f"Filter WEEKLY: {symbol} — weekly chart not bullish")
+                    filter_stats["weekly"] += 1
                     continue
 
             # 4-source composite sentiment filter (options + analyst + insider + retail)
             if is_sentiment_blocked(symbol):
+                logger.info(f"Filter SENTIMENT: {symbol} — composite sentiment too negative")
+                filter_stats["sentiment"] += 1
                 continue
 
             # Earnings blackout — skip if reporting in ≤ EARNINGS_BLACKOUT_DAYS
             if is_earnings_blackout(symbol):
+                logger.info(f"Filter EARNINGS: {symbol} — earnings blackout active")
+                filter_stats["earnings"] += 1
                 continue
 
             # Correlation limit — skip if too correlated with any open position
             if _is_too_correlated(symbol, data, open_returns):
+                filter_stats["correlation"] += 1
                 continue
 
             # 13F smart money boost — boost score if top funds are adding
@@ -310,11 +323,14 @@ class TradingBot:
             if df_ind.empty:
                 continue
 
-            # ML signal booster — require minimum probability estimate
+            # ML signal booster — require minimum probability estimate; fails open during warmup
             if Config.ML_SIGNAL_ENABLED:
                 if not is_ml_approved(symbol, df, Config.ML_MIN_PROBABILITY):
-                    logger.info(f"ML filter blocked {symbol} (below p={Config.ML_MIN_PROBABILITY:.2f})")
+                    logger.info(f"Filter ML: {symbol} — below p={Config.ML_MIN_PROBABILITY:.2f}")
+                    filter_stats["ml"] += 1
                     continue
+
+            filter_stats["passed"] += 1
 
             latest = df_ind.iloc[-1]
             price = float(latest["close"])
@@ -363,6 +379,16 @@ class TradingBot:
                     cash -= cost
             else:
                 logger.info(f"[DRY RUN] Would place: BUY {shares} {symbol} @ ${price:.2f}")
+
+        # Log filter funnel summary for diagnostics
+        if buy_candidates:
+            logger.info(
+                f"Filter funnel ({len(buy_candidates)} candidates): "
+                f"sector={filter_stats['sector']} weekly={filter_stats['weekly']} "
+                f"sentiment={filter_stats['sentiment']} earnings={filter_stats['earnings']} "
+                f"corr={filter_stats['correlation']} ml={filter_stats['ml']} "
+                f"→ passed={filter_stats['passed']}"
+            )
 
         # --- IPO pass: trade mature IPOs with lightweight momentum signal ---
         if not self.risk.max_positions_reached(len(get_positions())):

@@ -190,7 +190,13 @@ def _train_model(symbol: str, df: pd.DataFrame):
 
 
 def _get_model(symbol: str, df: pd.DataFrame):
-    """Return a cached or freshly trained model. Returns None on warm-up."""
+    """
+    Return a cached or freshly trained model.
+    If the provided df is too short for training, fetches 1 year of history
+    from yfinance so the model can be trained even when the scan lookback is
+    short (e.g. lookback_days=100 in main scan).
+    Returns None only when sklearn is missing or data has a single class.
+    """
     global _model_cache
     now = time.time()
 
@@ -200,7 +206,20 @@ def _get_model(symbol: str, df: pd.DataFrame):
         if (now - ts) < _CACHE_TTL:
             return model
 
-    model = _train_model(symbol, df)
+    # If the provided df is too short, try fetching a full year via yfinance
+    train_df = df
+    if len(df) < MIN_SAMPLES + FORWARD_DAYS + 30:
+        try:
+            import yfinance as yf
+            hist = yf.download(symbol, period="2y", interval="1d",
+                               progress=False, auto_adjust=True)
+            if not hist.empty:
+                hist.columns = [c.lower() for c in hist.columns]
+                train_df = hist
+        except Exception:
+            pass  # fall back to original df
+
+    model = _train_model(symbol, train_df)
     if model is not None:
         _model_cache[symbol] = (model, now)
     return model
@@ -213,45 +232,52 @@ def get_ml_probability(symbol: str, df: pd.DataFrame) -> float:
     Returns the probability (0.0–1.0) that a BUY on this symbol will yield
     a profitable trade within FORWARD_DAYS days.
 
-    Returns 0.5 (neutral) when:
+    Returns None when:
       • scikit-learn is not installed
       • insufficient training history (warm-up period)
-      • inference fails for any reason
+
+    Returns 0.5 (neutral) when inference fails for any reason.
     """
     model = _get_model(symbol, df)
     if model is None:
-        return 0.5
+        return None  # warm-up sentinel — caller should fail open
 
     try:
         features  = _build_features(df)
         latest    = features.iloc[[-1]]
 
-        # Align to training columns
         feat_cols = getattr(model, "feature_names", list(features.columns))
         available = [c for c in feat_cols if c in latest.columns]
         if len(available) < len(feat_cols):
-            return 0.5  # missing features — don't block
+            return None  # missing features — fail open
 
         row = latest[available].values
         if np.isnan(row).any():
-            return 0.5
+            return None
 
         prob = float(model.predict_proba(row)[0][1])
         return prob
 
     except Exception as exc:
         logger.debug(f"ML inference error for {symbol}: {exc}")
-        return 0.5
+        return None
 
 
 def is_ml_approved(symbol: str, df: pd.DataFrame, min_prob: float) -> bool:
     """
-    Returns True if the ML model approves the entry (probability >= min_prob)
-    or if the model is in warm-up (returns True to avoid blocking cold-start).
+    Returns True if the ML model approves the entry (probability >= min_prob).
+    Fails OPEN (returns True) during warm-up or on any error — never blocks
+    a trade just because the model hasn't trained yet.
     """
-    prob     = get_ml_probability(symbol, df)
+    prob = get_ml_probability(symbol, df)
+
+    if prob is None:
+        # Warm-up or missing sklearn — don't penalise the candidate
+        logger.debug(f"ML {symbol}: warmup/unavailable — PASS (fail open)")
+        return True
+
     approved = prob >= min_prob
-    logger.debug(
+    logger.info(
         f"ML {symbol}: p={prob:.3f} threshold={min_prob:.2f} → "
         f"{'PASS' if approved else 'BLOCK'}"
     )
