@@ -50,6 +50,19 @@ class Config:
         "NKE", "PM", "LIN", "BMY", "RTX", "QCOM", "AMGN", "UPS", "SBUX",
     ]
 
+    # Multi-timeframe confirmation
+    WEEKLY_CONFIRM_REQUIRED: bool = os.getenv("WEEKLY_CONFIRM_REQUIRED", "true").lower() != "false"
+
+    # Short selling
+    SHORT_SELLING_ENABLED: bool   = os.getenv("SHORT_SELLING_ENABLED", "false").lower() == "true"
+    SHORT_MAX_POSITIONS: int      = int(os.getenv("SHORT_MAX_POSITIONS", "3"))
+    SHORT_SECTOR_BOTTOM_N: int    = int(os.getenv("SHORT_SECTOR_BOTTOM_N", "3"))    # short only bottom N sectors
+    SHORT_MIN_SENTIMENT: float    = float(os.getenv("SHORT_MIN_SENTIMENT", "-2.0")) # composite score must be this negative
+
+    # SEC 13F smart money tracker
+    THIRTEEN_F_ENABLED: bool      = os.getenv("THIRTEEN_F_ENABLED", "true").lower() != "false"
+    THIRTEEN_F_BOOST_SCALE: float = float(os.getenv("THIRTEEN_F_BOOST_SCALE", "2.0"))  # pts per 13F unit
+
     # Sector rotation
     SECTOR_TOP_N: int = int(os.getenv("SECTOR_TOP_N", "4"))           # only buy in top N sectors by 3-month momentum
 

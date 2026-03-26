@@ -130,11 +130,15 @@ class Portfolio:
                 trade.exit_price = exit_price
                 trade.closed_at = datetime.utcnow().isoformat()
                 trade.status = status
-                trade.pnl = (exit_price - trade.entry_price) * trade.shares
-                trade.pnl_pct = (exit_price - trade.entry_price) / trade.entry_price
+                # Short P&L is inverted: profit when price falls
+                if trade.side == "SHORT":
+                    trade.pnl = (trade.entry_price - exit_price) * trade.shares
+                else:
+                    trade.pnl = (exit_price - trade.entry_price) * trade.shares
+                trade.pnl_pct = trade.pnl / (trade.entry_price * trade.shares)
                 self.save()
                 logger.info(
-                    f"Closed {symbol}: PnL=${trade.pnl:.2f} ({trade.pnl_pct:.2%}) [{status}]"
+                    f"Closed {trade.side} {symbol}: PnL=${trade.pnl:.2f} ({trade.pnl_pct:.2%}) [{status}]"
                 )
                 return trade
         logger.warning(f"No open trade found for {symbol} to close")

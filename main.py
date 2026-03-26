@@ -37,6 +37,9 @@ from analysis.news_scanner import find_news_catalysts
 from analysis.sentiment_engine import is_sentiment_blocked, apply_sentiment_boost, get_composite_sentiment
 from analysis.earnings_calendar import is_earnings_blackout, warn_open_positions_near_earnings
 from analysis.sector_rotation import is_in_top_sectors, get_sector_rankings
+from analysis.timeframe import weekly_confirms_entry, weekly_confirms_short
+from analysis.short_signals import screen_short_candidates, short_position_size
+from analysis.thirteen_f import get_thirteen_f_score
 from analysis.ipo_tracker import (
     register_new_ipos,
     get_tradeable_ipos,
@@ -257,6 +260,11 @@ class TradingBot:
             if not is_in_top_sectors(symbol):
                 continue
 
+            # Multi-timeframe: weekly chart must confirm the daily BUY
+            if Config.WEEKLY_CONFIRM_REQUIRED:
+                if not weekly_confirms_entry(data[symbol], symbol):
+                    continue
+
             # 4-source composite sentiment filter (options + analyst + insider + retail)
             if is_sentiment_blocked(symbol):
                 continue
@@ -268,6 +276,16 @@ class TradingBot:
             # Correlation limit — skip if too correlated with any open position
             if _is_too_correlated(symbol, data, open_returns):
                 continue
+
+            # 13F smart money boost — boost score if top funds are adding
+            if Config.THIRTEEN_F_ENABLED:
+                try:
+                    tf_score = get_thirteen_f_score(symbol)
+                    if tf_score != 0:
+                        score += int(tf_score * Config.THIRTEEN_F_BOOST_SCALE)
+                        logger.info(f"13F boost {symbol}: {tf_score:+d} → adjusted score={score}")
+                except Exception:
+                    pass
 
             df = data[symbol]
             from analysis.indicators import add_all_indicators
@@ -322,11 +340,95 @@ class TradingBot:
         if not self.risk.max_positions_reached(len(get_positions())):
             self._trade_ipos(open_symbols, equity, cash)
 
+        # --- Short selling pass ---
+        try:
+            self._scan_shorts(candidates, data, open_symbols, equity, cash)
+        except Exception as exc:
+            logger.error(f"Short scan error: {exc}")
+
         # --- Pairs trading: market-neutral stat-arb on cointegrated pairs ---
         try:
             self.scan_pairs(data, equity)
         except Exception as exc:
             logger.error(f"Pairs scan error: {exc}")
+
+    def _scan_shorts(
+        self,
+        candidates: list,
+        data: dict,
+        open_symbols: set,
+        equity: float,
+        cash: float,
+    ) -> None:
+        """Short-sell high-conviction SELL signals after all filters pass."""
+        short_candidates = screen_short_candidates(candidates, data, open_symbols)
+        if not short_candidates:
+            return
+
+        # Count existing short positions
+        existing_shorts = sum(
+            1 for t in self.portfolio.trades
+            if t.side == "SHORT" and t.status == "OPEN"
+        )
+
+        for symbol, score in short_candidates:
+            if existing_shorts >= Config.SHORT_MAX_POSITIONS:
+                break
+
+            # Composite sentiment must be negative to short
+            try:
+                from analysis.sentiment_engine import get_composite_sentiment
+                sent = get_composite_sentiment(symbol)
+                if sent["composite"] > Config.SHORT_MIN_SENTIMENT:
+                    logger.info(
+                        f"Short skipped {symbol}: sentiment {sent['composite']:+.1f} "
+                        f"not negative enough (need < {Config.SHORT_MIN_SENTIMENT})"
+                    )
+                    continue
+            except Exception:
+                pass
+
+            if symbol not in data or data[symbol].empty:
+                continue
+
+            df_ind = __import__("analysis.indicators", fromlist=["add_all_indicators"]).add_all_indicators(data[symbol]).dropna()
+            if df_ind.empty:
+                continue
+
+            price = float(df_ind["close"].iloc[-1])
+            atr   = float(df_ind["atr"].iloc[-1])
+            shares, stop_loss, take_profit = short_position_size(equity, price, atr)
+            cost = price * shares
+
+            if cost > cash * 0.95:
+                logger.info(f"Short {symbol}: insufficient cash")
+                continue
+
+            logger.info(
+                f"SHORT signal: {symbol} | score={score} | "
+                f"x{shares} @ ${price:.2f} | SL=${stop_loss:.2f} TP=${take_profit:.2f}"
+            )
+
+            if not self.dry_run:
+                order_id = place_short_order(symbol, shares)
+                if order_id:
+                    self.portfolio.open_trade(
+                        symbol=symbol,
+                        shares=shares,
+                        entry_price=price,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        order_id=order_id,
+                    )
+                    # Mark as SHORT in portfolio
+                    trade = self.portfolio.get_open_trade(symbol)
+                    if trade:
+                        trade.side = "SHORT"
+                        self.portfolio.save()
+                    self.risk.record_trade()
+                    existing_shorts += 1
+            else:
+                logger.info(f"[DRY RUN] Would SHORT {shares} {symbol} @ ${price:.2f}")
 
     def _trade_ipos(self, open_symbols: set, equity: float, cash: float) -> None:
         """
@@ -546,12 +648,15 @@ class TradingBot:
     def _check_exits(self, open_positions: dict, equity: float) -> None:
         """
         Exit checks for existing positions:
-          1. Trailing stop  — close if price drops > TRAILING_STOP_PCT from peak
-          2. Signal exit    — close on EMA death cross / SELL signal
-          3. Earnings warn  — log alert when earnings < 3 days away
-        Bracket orders still handle the hard SL/TP on the broker side.
+          1. Trailing stop  — close if price drops > TRAILING_STOP_PCT from peak (long)
+                             or rises > TRAILING_STOP_PCT above low (short)
+          2. Hard stop/TP   — for shorts managed here since they have no bracket
+          3. Signal exit    — close long on SELL signal; close short on BUY signal
+          4. Earnings warn  — log alert when earnings < 3 days away
+        Bracket orders still handle the hard SL/TP on the broker side for longs.
         """
         from data.fetcher import fetch_bars, fetch_latest_price
+        from trading.alpaca_client import cover_short_order
 
         # Warn about any open positions approaching earnings
         warn_open_positions_near_earnings(list(open_positions.keys()), days_before=3)
@@ -564,40 +669,107 @@ class TradingBot:
 
                 current_price = pos["market_value"] / pos["qty"] if pos["qty"] else float(df["close"].iloc[-1])
 
-                # --- Trailing stop ---
                 trade = self.portfolio.get_open_trade(symbol)
-                if trade:
-                    # Initialise high_water_mark on first check
-                    hwm = trade.high_water_mark or trade.entry_price
-                    if current_price > hwm:
-                        trade.high_water_mark = current_price
-                        self.portfolio.save()
-                        hwm = current_price
+                is_short = trade and trade.side == "SHORT"
 
-                    trail_floor = hwm * (1 - Config.TRAILING_STOP_PCT)
-                    if current_price < trail_floor:
+                if is_short:
+                    # ---- Short position exit logic ----
+                    entry = trade.entry_price
+                    qty   = trade.shares
+
+                    # Hard stop loss: price rose above stop level
+                    stop_price = trade.stop_loss or entry * (1 + Config.STOP_LOSS_PCT)
+                    if current_price >= stop_price:
                         logger.info(
-                            f"Trailing stop: {symbol} price=${current_price:.2f} "
-                            f"peak=${hwm:.2f} floor=${trail_floor:.2f} "
-                            f"({Config.TRAILING_STOP_PCT:.0%} trail)"
+                            f"SHORT stop loss: {symbol} price=${current_price:.2f} "
+                            f"stop=${stop_price:.2f}"
                         )
                         if not self.dry_run:
-                            if close_position(symbol):
+                            if cover_short_order(symbol, qty):
+                                self.portfolio.close_trade(symbol, current_price, status="STOPPED")
+                        else:
+                            logger.info(f"[DRY RUN] Would cover short (stop) {symbol}")
+                        continue
+
+                    # Hard take profit: price fell to target
+                    tp_price = trade.take_profit or entry * (1 - Config.TAKE_PROFIT_PCT)
+                    if tp_price > 0 and current_price <= tp_price:
+                        logger.info(
+                            f"SHORT take profit: {symbol} price=${current_price:.2f} "
+                            f"tp=${tp_price:.2f}"
+                        )
+                        if not self.dry_run:
+                            if cover_short_order(symbol, qty):
+                                self.portfolio.close_trade(symbol, current_price, status="TOOK_PROFIT")
+                        else:
+                            logger.info(f"[DRY RUN] Would cover short (TP) {symbol}")
+                        continue
+
+                    # Trailing stop for shorts: high_water_mark repurposed as low_water_mark
+                    lwm = trade.high_water_mark if trade.high_water_mark > 0 else entry
+                    if current_price < lwm:
+                        trade.high_water_mark = current_price
+                        self.portfolio.save()
+                        lwm = current_price
+
+                    trail_ceiling = lwm * (1 + Config.TRAILING_STOP_PCT)
+                    if current_price > trail_ceiling:
+                        logger.info(
+                            f"SHORT trailing stop: {symbol} price=${current_price:.2f} "
+                            f"low=${lwm:.2f} ceiling=${trail_ceiling:.2f}"
+                        )
+                        if not self.dry_run:
+                            if cover_short_order(symbol, qty):
                                 self.portfolio.close_trade(symbol, current_price, status="TRAILING_STOP")
                         else:
-                            logger.info(f"[DRY RUN] Would trailing-stop {symbol}")
-                        continue  # skip signal check for this symbol
+                            logger.info(f"[DRY RUN] Would cover short (trailing) {symbol}")
+                        continue
 
-                # --- Signal-based exit (death cross / SELL) ---
-                signal, score = self.strategy.generate_signal(df)
-                if signal == Signal.SELL:
-                    logger.info(f"Exit signal for {symbol} (score={score})")
-                    if not self.dry_run:
-                        if close_position(symbol):
-                            exit_price = fetch_latest_price(symbol) or pos["avg_entry"]
-                            self.portfolio.close_trade(symbol, exit_price, status="SIGNAL_EXIT")
-                    else:
-                        logger.info(f"[DRY RUN] Would close {symbol}")
+                    # Signal-based exit for short: cover on BUY signal
+                    signal, score = self.strategy.generate_signal(df)
+                    if signal == Signal.BUY:
+                        logger.info(f"SHORT signal exit for {symbol} — BUY reversal (score={score})")
+                        if not self.dry_run:
+                            if cover_short_order(symbol, qty):
+                                exit_price = fetch_latest_price(symbol) or current_price
+                                self.portfolio.close_trade(symbol, exit_price, status="SIGNAL_EXIT")
+                        else:
+                            logger.info(f"[DRY RUN] Would cover short (signal) {symbol}")
+
+                else:
+                    # ---- Long position exit logic ----
+                    if trade:
+                        # Initialise high_water_mark on first check
+                        hwm = trade.high_water_mark or trade.entry_price
+                        if current_price > hwm:
+                            trade.high_water_mark = current_price
+                            self.portfolio.save()
+                            hwm = current_price
+
+                        trail_floor = hwm * (1 - Config.TRAILING_STOP_PCT)
+                        if current_price < trail_floor:
+                            logger.info(
+                                f"Trailing stop: {symbol} price=${current_price:.2f} "
+                                f"peak=${hwm:.2f} floor=${trail_floor:.2f} "
+                                f"({Config.TRAILING_STOP_PCT:.0%} trail)"
+                            )
+                            if not self.dry_run:
+                                if close_position(symbol):
+                                    self.portfolio.close_trade(symbol, current_price, status="TRAILING_STOP")
+                            else:
+                                logger.info(f"[DRY RUN] Would trailing-stop {symbol}")
+                            continue  # skip signal check for this symbol
+
+                    # --- Signal-based exit (death cross / SELL) ---
+                    signal, score = self.strategy.generate_signal(df)
+                    if signal == Signal.SELL:
+                        logger.info(f"Exit signal for {symbol} (score={score})")
+                        if not self.dry_run:
+                            if close_position(symbol):
+                                exit_price = fetch_latest_price(symbol) or pos["avg_entry"]
+                                self.portfolio.close_trade(symbol, exit_price, status="SIGNAL_EXIT")
+                        else:
+                            logger.info(f"[DRY RUN] Would close {symbol}")
 
             except Exception as exc:
                 logger.error(f"Exit check error for {symbol}: {exc}")
