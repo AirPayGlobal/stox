@@ -14,12 +14,9 @@ class RiskManager:
     """
     Enforces risk rules before any trade is executed.
 
-    Conservative compounding approach:
-    - Fixed fractional position sizing (% of current equity)
-    - ATR-based stop-loss placement
-    - 3:1 reward-to-risk ratio for take-profit
-    - Daily loss circuit-breaker
-    - Max concurrent position limit
+    Position sizing uses Kelly Criterion (half-Kelly) when enough trade
+    history exists (≥ KELLY_MIN_TRADES). Falls back to fixed-fraction
+    sizing until sufficient history is available.
     """
 
     def __init__(self) -> None:
@@ -52,21 +49,75 @@ class RiskManager:
             return True
         return False
 
+    # -------------------------------------------------------------- Kelly sizing
+
+    def _kelly_fraction(
+        self,
+        win_rate: float,
+        avg_win_pct: float,
+        avg_loss_pct: float,
+    ) -> float:
+        """
+        Compute the half-Kelly optimal position fraction.
+
+        Full Kelly: f = (W*R - L) / R
+          where W = win rate, L = loss rate, R = avg_win / avg_loss
+
+        Half-Kelly is used for safety — same expected return as full Kelly
+        but ~half the variance.
+
+        Returns a fraction in [KELLY_MIN_FRACTION, MAX_POSITION_PCT].
+        """
+        if avg_loss_pct <= 0 or avg_win_pct <= 0 or win_rate <= 0:
+            return Config.MAX_POSITION_PCT
+
+        R = avg_win_pct / avg_loss_pct
+        W = win_rate
+        L = 1.0 - win_rate
+
+        full_kelly = (W * R - L) / R
+        half_kelly = full_kelly / 2.0
+
+        # Clamp to safe range
+        fraction = max(Config.KELLY_MIN_FRACTION, min(Config.MAX_POSITION_PCT, half_kelly))
+        return fraction
+
     def calculate_position_size(
         self,
         equity: float,
         price: float,
         atr: float,
+        win_rate: float = 0.0,
+        avg_win_pct: float = 0.0,
+        avg_loss_pct: float = 0.0,
+        trade_count: int = 0,
     ) -> tuple[int, float, float]:
         """
-        Calculate position size using volatility-adjusted fixed-fraction sizing.
+        Calculate position size.
 
-        Uses 1R = 1 ATR for stop-loss distance. Position size is capped
-        at MAX_POSITION_PCT of equity regardless.
+        When trade_count >= KELLY_MIN_TRADES, uses half-Kelly to set the
+        max position fraction. Falls back to fixed MAX_POSITION_PCT otherwise.
 
         Returns (shares, stop_loss_price, take_profit_price).
         """
-        # Risk amount per trade: fixed % of equity
+        # Decide which max-fraction to use
+        if trade_count >= Config.KELLY_MIN_TRADES and win_rate > 0:
+            kelly_f = self._kelly_fraction(win_rate, avg_win_pct, avg_loss_pct)
+            logger.info(
+                f"Kelly sizing: win_rate={win_rate:.1%} "
+                f"avg_win={avg_win_pct:.1%} avg_loss={avg_loss_pct:.1%} "
+                f"→ half-Kelly={kelly_f:.1%}"
+            )
+            max_position_pct = kelly_f
+        else:
+            max_position_pct = Config.MAX_POSITION_PCT
+            if trade_count < Config.KELLY_MIN_TRADES:
+                logger.debug(
+                    f"Kelly inactive: {trade_count}/{Config.KELLY_MIN_TRADES} trades "
+                    f"— using fixed {max_position_pct:.1%}"
+                )
+
+        # Risk amount per trade (fixed % of equity)
         risk_amount = equity * Config.STOP_LOSS_PCT
 
         # ATR-based stop distance (1 ATR below entry)
@@ -75,18 +126,17 @@ class RiskManager:
         # Shares: risk_amount / stop_distance
         shares_by_risk = risk_amount / stop_distance
 
-        # Cap at max position % of equity
-        max_shares_by_pct = (equity * Config.MAX_POSITION_PCT) / price
+        # Cap at Kelly/fixed max position % of equity
+        max_shares_by_pct = (equity * max_position_pct) / price
 
         shares = int(min(shares_by_risk, max_shares_by_pct))
-        shares = max(shares, 1)  # always trade at least 1 share
+        shares = max(shares, 1)
 
-        # Ensure stop_distance is sane (at least 0.1% of price)
+        # Sane stop distance floor
         stop_distance = max(stop_distance, price * 0.001)
         stop_loss = price - stop_distance
         take_profit = price + (stop_distance * 3)  # 3:1 R:R
 
-        # Validate
         if stop_loss <= 0 or stop_loss >= price or take_profit <= price:
             logger.warning(f"Invalid SL/TP: price={price} SL={stop_loss} TP={take_profit}")
             stop_loss = price * 0.98
@@ -94,7 +144,8 @@ class RiskManager:
 
         logger.debug(
             f"Sizing: equity={equity:.0f} price={price:.2f} atr={atr:.2f} "
-            f"shares={shares} SL={stop_loss:.2f} TP={take_profit:.2f}"
+            f"max_pct={max_position_pct:.1%} shares={shares} "
+            f"SL={stop_loss:.2f} TP={take_profit:.2f}"
         )
         return shares, stop_loss, take_profit
 
@@ -104,3 +155,4 @@ class RiskManager:
     @property
     def trades_today(self) -> int:
         return self._trades_today
+

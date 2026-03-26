@@ -36,6 +36,7 @@ from analysis.market_filter import is_vix_too_high
 from analysis.news_scanner import find_news_catalysts
 from analysis.sentiment_engine import is_sentiment_blocked, apply_sentiment_boost, get_composite_sentiment
 from analysis.earnings_calendar import is_earnings_blackout, warn_open_positions_near_earnings
+from analysis.sector_rotation import is_in_top_sectors, get_sector_rankings
 from analysis.ipo_tracker import (
     register_new_ipos,
     get_tradeable_ipos,
@@ -220,12 +221,36 @@ class TradingBot:
 
         logger.info(f"Buy candidates: {len(buy_candidates)}")
 
+        # Log sector rankings once per scan for visibility
+        try:
+            rankings = get_sector_rankings()
+            if rankings:
+                logger.info(
+                    "Sector rankings: "
+                    + " | ".join(f"#{r} {e}" for e, _, r in rankings[:4])
+                )
+        except Exception:
+            pass
+
         # Pre-compute returns for open positions (used in correlation check)
         open_returns = _position_returns(open_positions, data)
+
+        # Kelly inputs from portfolio history
+        port_summary = self.portfolio.summary()
+        kelly_kwargs = dict(
+            win_rate=port_summary.get("win_rate", 0.0),
+            avg_win_pct=port_summary.get("avg_win", 0.0) / max(equity, 1),
+            avg_loss_pct=abs(port_summary.get("avg_loss", 0.0)) / max(equity, 1),
+            trade_count=port_summary.get("total_trades", 0),
+        )
 
         for symbol, signal, score in buy_candidates:
             if self.risk.max_positions_reached(len(get_positions())):
                 break
+
+            # Sector rotation — skip if sector not in top N by momentum
+            if not is_in_top_sectors(symbol):
+                continue
 
             # 4-source composite sentiment filter (options + analyst + insider + retail)
             if is_sentiment_blocked(symbol):
@@ -253,6 +278,7 @@ class TradingBot:
                 equity=equity,
                 price=price,
                 atr=atr,
+                **kelly_kwargs,
             )
 
             # Ensure we have enough cash

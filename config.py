@@ -50,6 +50,13 @@ class Config:
         "NKE", "PM", "LIN", "BMY", "RTX", "QCOM", "AMGN", "UPS", "SBUX",
     ]
 
+    # Sector rotation
+    SECTOR_TOP_N: int = int(os.getenv("SECTOR_TOP_N", "4"))           # only buy in top N sectors by 3-month momentum
+
+    # Kelly Criterion position sizing
+    KELLY_MIN_TRADES: int = int(os.getenv("KELLY_MIN_TRADES", "20"))          # min closed trades before Kelly activates
+    KELLY_MIN_FRACTION: float = float(os.getenv("KELLY_MIN_FRACTION", "0.01")) # floor: never size below 1% of equity
+
     # Trailing stop
     TRAILING_STOP_PCT: float = float(os.getenv("TRAILING_STOP_PCT", "0.06"))   # close if price drops 6% from peak
 
