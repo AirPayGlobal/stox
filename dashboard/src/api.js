@@ -50,3 +50,7 @@ export async function approveTrade(id) {
 export async function declineTrade(id) {
   return client.post(`/api/pending-trades/${id}/decline`)
 }
+
+export async function fetchPairs() {
+  return client.get('/api/pairs')
+}

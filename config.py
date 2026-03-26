@@ -76,5 +76,13 @@ class Config:
     IPO_POSITION_SCALE: float = float(os.getenv("IPO_POSITION_SCALE", "0.5"))   # 50% of normal size
     IPO_STOP_LOSS_PCT: float = float(os.getenv("IPO_STOP_LOSS_PCT", "0.04"))    # 4% stop (wider than normal 2%)
 
+    # Pairs trading / statistical arbitrage
+    PAIRS_MAX_POSITIONS: int   = int(os.getenv("PAIRS_MAX_POSITIONS", "2"))       # max simultaneous pair trades
+    PAIRS_POSITION_PCT: float  = float(os.getenv("PAIRS_POSITION_PCT", "0.03"))   # 3% of equity per leg (6% total)
+    PAIRS_WINDOW: int          = int(os.getenv("PAIRS_WINDOW", "60"))             # rolling window for z-score (days)
+    PAIRS_ENTRY_ZSCORE: float  = float(os.getenv("PAIRS_ENTRY_ZSCORE", "2.0"))   # enter when |z| > this
+    PAIRS_EXIT_ZSCORE: float   = float(os.getenv("PAIRS_EXIT_ZSCORE", "0.5"))    # exit when |z| < this
+    PAIRS_STOP_ZSCORE: float   = float(os.getenv("PAIRS_STOP_ZSCORE", "3.5"))    # stop loss when |z| > this
+
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

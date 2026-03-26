@@ -470,3 +470,29 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
 
 .ipo-actions { display: flex; gap: 10px; }
 .ipo-actions .btn { min-width: 100px; }
+
+/* ------------------------------------------------------------------ Pairs Panel */
+
+.pairs-panel .pairs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+
+.pairs-panel h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pairs-summary {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.mono { font-family: var(--mono); font-size: 12px; }

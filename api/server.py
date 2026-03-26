@@ -119,6 +119,13 @@ def bot_stop(_: str = Depends(verify)) -> dict[str, Any]:
     return bot_manager.stop()
 
 
+@app.get("/api/pairs")
+def pairs(_: str = Depends(verify)) -> dict[str, Any]:
+    """Return open and recent closed pair positions + summary stats."""
+    from trading.pairs_manager import get_all_pairs, pairs_summary
+    return {"pairs": get_all_pairs(limit=30), "summary": pairs_summary()}
+
+
 @app.get("/api/sentiment/{symbol}")
 def sentiment(symbol: str, _: str = Depends(verify)) -> dict[str, Any]:
     """Return the 4-source composite sentiment breakdown for a symbol."""

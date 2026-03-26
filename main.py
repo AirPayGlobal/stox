@@ -44,6 +44,11 @@ from analysis.ipo_tracker import (
     ipo_position_size,
 )
 from trading.approval_queue import submit as queue_approval, get_expired, mark_executed
+from trading.alpaca_client import place_long_order, place_short_order, cover_short_order
+from analysis.pairs_trading import screen_pairs, pair_position_sizes, PairSignal, PAIRS
+from trading.pairs_manager import (
+    get_open_pairs, open_pair as record_open_pair, close_pair as record_close_pair,
+)
 from utils.logger import get_logger
 
 logger = get_logger("main")
@@ -317,6 +322,12 @@ class TradingBot:
         if not self.risk.max_positions_reached(len(get_positions())):
             self._trade_ipos(open_symbols, equity, cash)
 
+        # --- Pairs trading: market-neutral stat-arb on cointegrated pairs ---
+        try:
+            self.scan_pairs(data, equity)
+        except Exception as exc:
+            logger.error(f"Pairs scan error: {exc}")
+
     def _trade_ipos(self, open_symbols: set, equity: float, cash: float) -> None:
         """
         Separate trading pass for recently listed IPOs.
@@ -417,6 +428,120 @@ class TradingBot:
             if self.risk.max_positions_reached(len(get_positions())):
                 break
             self._execute_approved(entry, auto=True)
+
+    def scan_pairs(self, data: dict, equity: float) -> None:
+        """
+        Pairs trading scan — runs after the main signal loop each cycle.
+
+        1. Fetch data for all pair symbols not already in the main scan.
+        2. Check open pair positions for EXIT or STOP signals.
+        3. Check for new ENTRY signals (if under max pair positions).
+        """
+        from data.fetcher import fetch_bars, fetch_latest_price
+
+        # Ensure we have data for all pair symbols
+        all_pair_symbols = {sym for pair in PAIRS for sym in pair}
+        missing = all_pair_symbols - set(data.keys())
+        for sym in missing:
+            df = fetch_bars(sym, lookback_days=Config.PAIRS_WINDOW + 10)
+            if not df.empty:
+                data[sym] = df
+
+        open_pairs = get_open_pairs()
+        signals = screen_pairs(data, open_pairs)
+
+        # --- Manage exits first ---
+        for sym_a, sym_b, signal, z, beta in signals:
+            if signal not in (PairSignal.EXIT, PairSignal.STOP):
+                continue
+
+            pair = next(
+                (p for p in open_pairs
+                 if (p["symbol_a"], p["symbol_b"]) in [(sym_a, sym_b), (sym_b, sym_a)]),
+                None,
+            )
+            if not pair:
+                continue
+
+            sym_long  = pair["symbol_long"]
+            sym_short = pair["symbol_short"]
+            p_long    = fetch_latest_price(sym_long)  or pair["price_long"]
+            p_short   = fetch_latest_price(sym_short) or pair["price_short"]
+            reason    = "MEAN_REVERSION" if signal == PairSignal.EXIT else "STOP_LOSS"
+
+            logger.info(
+                f"Pairs {reason}: closing {pair['pair_id']} "
+                f"LONG {sym_long} / SHORT {sym_short} z={z:.2f}"
+            )
+
+            if not self.dry_run:
+                # Sell long leg, cover short leg simultaneously
+                close_position(sym_long)
+                cover_short_order(sym_short, pair["qty_short"])
+                record_close_pair(pair["pair_id"], p_long, p_short, z, reason)
+            else:
+                logger.info(f"[DRY RUN] Would close pair {pair['pair_id']}")
+
+        # Reload after potential closures
+        open_pairs = get_open_pairs()
+
+        # --- New entries ---
+        if len(open_pairs) >= Config.PAIRS_MAX_POSITIONS:
+            logger.debug(f"Pairs: max positions ({Config.PAIRS_MAX_POSITIONS}) reached")
+            return
+
+        for sym_a, sym_b, signal, z, beta in signals:
+            if signal not in (PairSignal.LONG_A_SHORT_B, PairSignal.LONG_B_SHORT_A):
+                continue
+
+            if len(get_open_pairs()) >= Config.PAIRS_MAX_POSITIONS:
+                break
+
+            # Determine which leg is long, which is short
+            if signal == PairSignal.LONG_A_SHORT_B:
+                sym_long, sym_short = sym_a, sym_b
+            else:
+                sym_long, sym_short = sym_b, sym_a
+
+            price_long  = float(data[sym_long]["close"].iloc[-1])
+            price_short = float(data[sym_short]["close"].iloc[-1])
+
+            qty_long, qty_short = pair_position_sizes(equity, price_long, price_short)
+            cost = price_long * qty_long
+
+            logger.info(
+                f"Pairs ENTRY: LONG {qty_long}×{sym_long} @ ${price_long:.2f} "
+                f"/ SHORT {qty_short}×{sym_short} @ ${price_short:.2f} "
+                f"z={z:.2f} β={beta:.3f}"
+            )
+
+            if not self.dry_run:
+                oid_long  = place_long_order(sym_long, qty_long)
+                oid_short = place_short_order(sym_short, qty_short)
+
+                if oid_long and oid_short:
+                    record_open_pair(
+                        symbol_a=sym_a,
+                        symbol_b=sym_b,
+                        direction=signal,
+                        symbol_long=sym_long,
+                        symbol_short=sym_short,
+                        qty_long=qty_long,
+                        qty_short=qty_short,
+                        price_long=price_long,
+                        price_short=price_short,
+                        hedge_ratio=beta,
+                        z_score=z,
+                        order_long_id=oid_long,
+                        order_short_id=oid_short,
+                    )
+                else:
+                    logger.warning(f"Pairs entry partial failure: {sym_long}/{sym_short}")
+            else:
+                logger.info(
+                    f"[DRY RUN] Would open pair: "
+                    f"LONG {qty_long}×{sym_long} / SHORT {qty_short}×{sym_short}"
+                )
 
     def _check_exits(self, open_positions: dict, equity: float) -> None:
         """

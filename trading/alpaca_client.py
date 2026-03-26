@@ -115,6 +115,63 @@ def place_bracket_order(
         return None
 
 
+def place_short_order(symbol: str, qty: int) -> Optional[str]:
+    """
+    Short-sell a stock (sell shares we don't own).
+    Returns the order ID on success, None on failure.
+    """
+    try:
+        request = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.SELL,
+            time_in_force=TimeInForce.DAY,
+        )
+        order = get_trading_client().submit_order(request)
+        logger.info(f"SHORT {qty} {symbol} | order={order.id}")
+        return str(order.id)
+    except Exception as exc:
+        logger.error(f"Failed to short {symbol}: {exc}")
+        return None
+
+
+def cover_short_order(symbol: str, qty: int) -> Optional[str]:
+    """
+    Buy to cover an existing short position.
+    Returns the order ID on success, None on failure.
+    """
+    try:
+        request = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY,
+        )
+        order = get_trading_client().submit_order(request)
+        logger.info(f"COVER {qty} {symbol} | order={order.id}")
+        return str(order.id)
+    except Exception as exc:
+        logger.error(f"Failed to cover short {symbol}: {exc}")
+        return None
+
+
+def place_long_order(symbol: str, qty: int) -> Optional[str]:
+    """Simple market BUY (no bracket). Used for pairs long leg."""
+    try:
+        request = MarketOrderRequest(
+            symbol=symbol,
+            qty=qty,
+            side=OrderSide.BUY,
+            time_in_force=TimeInForce.DAY,
+        )
+        order = get_trading_client().submit_order(request)
+        logger.info(f"LONG {qty} {symbol} | order={order.id}")
+        return str(order.id)
+    except Exception as exc:
+        logger.error(f"Failed to place long order for {symbol}: {exc}")
+        return None
+
+
 def close_position(symbol: str) -> bool:
     """Close an open position for the given symbol."""
     try:

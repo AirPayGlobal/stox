@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -311,6 +311,107 @@ function TradesTable({ trades }) {
   )
 }
 
+// ------------------------------------------------------------------ Pairs Panel
+
+function PairsPanel() {
+  const [pairs, setPairs] = useState([])
+  const [summary, setSummary] = useState(null)
+  const [open, setOpen] = useState(true)
+
+  useEffect(() => {
+    const load = () =>
+      fetchPairs()
+        .then(r => { setPairs(r.data.pairs); setSummary(r.data.summary) })
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  if (!pairs.length) return null
+
+  const openPairs  = pairs.filter(p => p.status === 'open')
+  const closedPairs = pairs.filter(p => p.status === 'closed').slice(0, 5)
+
+  return (
+    <div className="card pairs-panel">
+      <div className="pairs-header" onClick={() => setOpen(o => !o)}>
+        <h2>
+          Pairs / Stat-Arb
+          <span className="count-badge">{openPairs.length} open</span>
+          {summary && (
+            <span className="pairs-summary">
+              Total P&L: <span className={summary.total_pnl >= 0 ? 'green' : 'red'}>{fmt$(summary.total_pnl)}</span>
+              &nbsp;·&nbsp;Win rate: {summary.closed_pairs > 0 ? (summary.win_rate * 100).toFixed(0) : '—'}%
+            </span>
+          )}
+        </h2>
+        <span className="log-toggle">{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <>
+          {openPairs.length > 0 && (
+            <div className="table-scroll" style={{ marginBottom: 12 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Pair</th>
+                    <th>Long</th>
+                    <th>Short</th>
+                    <th>Entry Z</th>
+                    <th>Opened</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {openPairs.map(p => (
+                    <tr key={p.pair_id}>
+                      <td className="symbol">{p.symbol_a}/{p.symbol_b}</td>
+                      <td><span className="green">{p.qty_long}×{p.symbol_long}</span> @ {fmt$(p.price_long)}</td>
+                      <td><span className="red">{p.qty_short}×{p.symbol_short}</span> @ {fmt$(p.price_short)}</td>
+                      <td className="mono">{p.entry_z?.toFixed(2)}</td>
+                      <td className="muted">{fmtDateTime(p.opened_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {closedPairs.length > 0 && (
+            <div className="table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Pair</th>
+                    <th>P&L</th>
+                    <th>Exit Z</th>
+                    <th>Reason</th>
+                    <th>Closed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {closedPairs.map(p => (
+                    <tr key={p.pair_id}>
+                      <td className="symbol">{p.symbol_a}/{p.symbol_b}</td>
+                      <td><PnlCell value={p.pnl} /></td>
+                      <td className="mono">{p.exit_z?.toFixed(2)}</td>
+                      <td><span className={`badge ${p.close_reason === 'MEAN_REVERSION' ? 'badge-profit' : 'badge-stopped'}`}>
+                        {p.close_reason}
+                      </span></td>
+                      <td className="muted">{fmtDateTime(p.closed_at)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ IPO Approval Panel
 
 function Countdown({ expiresAt }) {
@@ -499,6 +600,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
       <main className="main">
         <StatsRow account={account} summary={summary} posCount={Object.keys(positions).length} />
         <IPOApprovalPanel />
+        <PairsPanel />
         <EquityChart snapshots={equityCurve} />
         <div className="tables-grid">
           <PositionsTable positions={positions} />
