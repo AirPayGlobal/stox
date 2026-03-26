@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -676,6 +676,195 @@ function AnalyticsPanel() {
   )
 }
 
+// ------------------------------------------------------------------ Market Panel
+
+function Ticker({ symbol, data, highlight }) {
+  if (!data) return null
+  const up = data.change_pct >= 0
+  return (
+    <div className={`ticker-card ${highlight ? 'ticker-highlight' : ''}`}>
+      <span className="ticker-sym">{symbol}</span>
+      <span className="ticker-price">{fmt$(data.price)}</span>
+      <span className={`ticker-chg ${up ? 'green' : 'red'}`}>
+        {up ? '+' : ''}{data.change_pct?.toFixed(2)}%
+      </span>
+    </div>
+  )
+}
+
+function SectorBar({ sector, max }) {
+  const pct = sector.change_pct
+  const up  = pct >= 0
+  const barW = Math.min(Math.abs(pct) / max * 100, 100)
+  return (
+    <div className="sector-row">
+      <span className="sector-sym">{sector.symbol}</span>
+      <span className="sector-name">{sector.name}</span>
+      <div className="sector-bar-wrap">
+        <div
+          className={`sector-bar ${up ? 'sector-bar-up' : 'sector-bar-dn'}`}
+          style={{ width: `${barW}%` }}
+        />
+      </div>
+      <span className={`sector-pct ${up ? 'green' : 'red'}`}>
+        {up ? '+' : ''}{pct.toFixed(2)}%
+      </span>
+    </div>
+  )
+}
+
+function FilterPill({ label, value, blocking }) {
+  return (
+    <div className={`filter-pill ${blocking ? 'filter-pill-block' : 'filter-pill-ok'}`}>
+      <span className="filter-label">{label}</span>
+      <span className="filter-val">{value}</span>
+    </div>
+  )
+}
+
+function MarketPanel() {
+  const [data, setData] = useState(null)
+  const [open, setOpen] = useState(true)
+  const [lastUpdate, setLastUpdate] = useState(null)
+
+  useEffect(() => {
+    const load = () =>
+      fetchMarket()
+        .then(r => { setData(r.data); setLastUpdate(new Date()) })
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 60_000) // refresh every 60s
+    return () => clearInterval(id)
+  }, [])
+
+  if (!data) return null
+
+  const { indices, vix, sectors, filter_state: fs, watchlist_snapshot: snap } = data
+  const maxSectorAbs = sectors.length
+    ? Math.max(...sectors.map(s => Math.abs(s.change_pct)), 0.1)
+    : 1
+
+  return (
+    <div className="card market-panel">
+      <div className="market-header" onClick={() => setOpen(o => !o)}>
+        <h2>
+          Live Market
+          {vix && (
+            <span
+              className={`vix-badge ${vix.price > 30 ? 'vix-high' : vix.price > 20 ? 'vix-mid' : 'vix-low'}`}
+              title="CBOE Volatility Index"
+            >
+              VIX {vix.price}
+            </span>
+          )}
+        </h2>
+        {lastUpdate && (
+          <span className="market-updated">
+            updated {lastUpdate.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+          </span>
+        )}
+        <span className="log-toggle">{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div className="market-body">
+
+          {/* Indices row */}
+          <div className="market-section">
+            <div className="market-section-label">Indices</div>
+            <div className="ticker-row">
+              {Object.entries(indices || {}).map(([sym, d]) => (
+                <Ticker key={sym} symbol={sym} data={d} />
+              ))}
+              {vix && <Ticker symbol="VIX" data={vix} />}
+            </div>
+          </div>
+
+          {/* Bot filter state */}
+          {fs && Object.keys(fs).length > 0 && (
+            <div className="market-section">
+              <div className="market-section-label">Bot Filters</div>
+              <div className="filter-pills">
+                <FilterPill
+                  label="VIX"
+                  value={`${fs.vix_value ?? '?'} / ${fs.vix_threshold} threshold`}
+                  blocking={fs.vix_blocking}
+                />
+                <FilterPill
+                  label="Regime"
+                  value={`${fs.regime ?? '?'} · ${fs.regime_sizing ?? '?'} size`}
+                  blocking={fs.regime === 'HIGH_VOL'}
+                />
+                <FilterPill
+                  label="ML Signal"
+                  value={fs.ml_enabled ? `p ≥ ${fs.ml_min_prob}` : 'disabled'}
+                  blocking={!fs.ml_enabled}
+                />
+                <FilterPill
+                  label="Weekly Confirm"
+                  value={fs.weekly_req ? 'required' : 'off'}
+                  blocking={false}
+                />
+                <FilterPill
+                  label="Sector Filter"
+                  value={`top ${fs.sector_top_n} sectors`}
+                  blocking={false}
+                />
+                <FilterPill
+                  label="Kelly Sizing"
+                  value={fs.kelly_active ? 'active' : 'warmup'}
+                  blocking={false}
+                />
+                <FilterPill
+                  label="Short Selling"
+                  value={fs.short_enabled ? 'enabled' : 'disabled'}
+                  blocking={false}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="market-columns">
+            {/* Sector heatmap */}
+            {sectors.length > 0 && (
+              <div className="market-section market-section-sectors">
+                <div className="market-section-label">Sectors (1d)</div>
+                <div className="sector-list">
+                  {sectors.map(s => (
+                    <SectorBar key={s.symbol} sector={s} max={maxSectorAbs} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Watchlist snapshot */}
+            {snap.length > 0 && (
+              <div className="market-section market-section-snap">
+                <div className="market-section-label">Watchlist Snapshot</div>
+                <div className="snap-list">
+                  {snap.map(s => (
+                    <div key={s.symbol} className={`snap-row ${s.is_open ? 'snap-open' : ''}`}>
+                      <span className="snap-sym">
+                        {s.is_open && <span className="snap-dot">●</span>}
+                        {s.symbol}
+                      </span>
+                      <span className="snap-price">{fmt$(s.price)}</span>
+                      <span className={`snap-chg ${s.change_pct >= 0 ? 'green' : 'red'}`}>
+                        {s.change_pct >= 0 ? '+' : ''}{s.change_pct?.toFixed(2)}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ Features Panel
 
 const TIER_COLORS = { 1: '#58a6ff', 2: '#bc8cff', 3: '#3fb950' }
@@ -867,6 +1056,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
 
       <main className="main">
         <StatsRow account={account} summary={summary} posCount={Object.keys(positions).length} />
+        <MarketPanel />
         <IPOApprovalPanel />
         <PairsPanel />
         <FeaturesPanel />

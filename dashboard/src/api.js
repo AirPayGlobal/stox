@@ -66,3 +66,7 @@ export async function fetchRegime() {
 export async function fetchFeatures() {
   return client.get('/api/features')
 }
+
+export async function fetchMarket() {
+  return client.get('/api/market')
+}

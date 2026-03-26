@@ -178,6 +178,137 @@ def decline_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
     return {"message": "Trade declined"}
 
 
+@app.get("/api/market")
+def market_data(_: str = Depends(verify)) -> dict[str, Any]:
+    """
+    Real-time market snapshot: VIX, SPY/QQQ/IWM, sector ETFs, open positions
+    + top watchlist prices, and the current bot filter state.
+    Data sourced from yfinance (15-min delayed).
+    """
+    import yfinance as yf
+    from analysis.regime import get_regime_detail
+    from analysis.sector_rotation import SECTOR_ETF_NAMES
+
+    result: dict[str, Any] = {
+        "indices": {},
+        "vix": None,
+        "sectors": [],
+        "regime": None,
+        "watchlist_snapshot": [],
+        "filter_state": {},
+    }
+
+    # --- Major indices + VIX ---
+    try:
+        raw = yf.download(
+            ["SPY", "QQQ", "IWM", "^VIX"],
+            period="2d", interval="1d",
+            progress=False, auto_adjust=True, group_by="ticker",
+        )
+        for sym in ["SPY", "QQQ", "IWM", "^VIX"]:
+            try:
+                c = raw[sym]["Close"]
+                prev = float(c.iloc[-2])
+                curr = float(c.iloc[-1])
+                entry = {"price": round(curr, 2), "change_pct": round((curr / prev - 1) * 100, 2)}
+                if sym == "^VIX":
+                    result["vix"] = entry
+                else:
+                    result["indices"][sym] = entry
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.debug(f"Index fetch failed: {exc}")
+
+    # --- Sector ETFs ---
+    try:
+        etf_syms = list(SECTOR_ETF_NAMES.keys())
+        etf_raw = yf.download(
+            etf_syms, period="2d", interval="1d",
+            progress=False, auto_adjust=True, group_by="ticker",
+        )
+        sectors = []
+        for sym in etf_syms:
+            try:
+                c = etf_raw[sym]["Close"]
+                prev = float(c.iloc[-2])
+                curr = float(c.iloc[-1])
+                sectors.append({
+                    "symbol": sym,
+                    "name": SECTOR_ETF_NAMES[sym],
+                    "price": round(curr, 2),
+                    "change_pct": round((curr / prev - 1) * 100, 2),
+                })
+            except Exception:
+                continue
+        sectors.sort(key=lambda x: x["change_pct"], reverse=True)
+        result["sectors"] = sectors
+    except Exception as exc:
+        logger.debug(f"Sector ETF fetch failed: {exc}")
+
+    # --- Regime ---
+    try:
+        result["regime"] = get_regime_detail()
+    except Exception:
+        pass
+
+    # --- Watchlist snapshot: open positions first, then top 10 watchlist ---
+    try:
+        p = Portfolio()
+        open_syms = [t.symbol for t in p.trades if t.status == "OPEN"]
+        snap_syms = list(dict.fromkeys(open_syms + Config.WATCHLIST[:10]))
+        snap_raw = yf.download(
+            snap_syms, period="2d", interval="1d",
+            progress=False, auto_adjust=True, group_by="ticker",
+        )
+        snap = []
+        for sym in snap_syms:
+            try:
+                if len(snap_syms) == 1:
+                    c = snap_raw["Close"]
+                else:
+                    c = snap_raw[sym]["Close"]
+                prev = float(c.iloc[-2])
+                curr = float(c.iloc[-1])
+                snap.append({
+                    "symbol": sym,
+                    "price": round(curr, 2),
+                    "change_pct": round((curr / prev - 1) * 100, 2),
+                    "is_open": sym in open_syms,
+                })
+            except Exception:
+                continue
+        snap.sort(key=lambda x: (not x["is_open"], -abs(x["change_pct"])))
+        result["watchlist_snapshot"] = snap
+    except Exception as exc:
+        logger.debug(f"Watchlist snapshot failed: {exc}")
+
+    # --- Current filter state summary ---
+    try:
+        vix_val = result["vix"]["price"] if result["vix"] else None
+        reg = result["regime"].get("regime") if result["regime"] else None
+        result["filter_state"] = {
+            "vix_value":     vix_val,
+            "vix_threshold": Config.VIX_THRESHOLD,
+            "vix_blocking":  vix_val is not None and vix_val > Config.VIX_THRESHOLD,
+            "regime":        reg,
+            "regime_sizing": {
+                "BULL": "100%", "RANGING": "60%",
+                "HIGH_VOL": "blocked", "BEAR": "50%",
+            }.get(reg or "", "100%"),
+            "ml_enabled":    Config.ML_SIGNAL_ENABLED,
+            "ml_min_prob":   Config.ML_MIN_PROBABILITY,
+            "short_enabled": Config.SHORT_SELLING_ENABLED,
+            "weekly_req":    Config.WEEKLY_CONFIRM_REQUIRED,
+            "sector_top_n":  Config.SECTOR_TOP_N,
+            "kelly_active":  Portfolio().summary().get("total_trades", 0) >= Config.KELLY_MIN_TRADES,
+        }
+    except Exception:
+        pass
+
+    return result
+
+
 @app.get("/api/analytics")
 def analytics(_: str = Depends(verify)) -> dict[str, Any]:
     """Portfolio risk metrics: Sharpe, Sortino, drawdown, VaR, equity curve."""
