@@ -19,8 +19,9 @@ from fastapi.staticfiles import StaticFiles
 
 from api.bot_manager import bot_manager
 from config import Config
-from trading.alpaca_client import get_account, get_positions
+from trading.alpaca_client import get_account, get_positions, place_bracket_order
 from trading.portfolio import Portfolio
+from trading.approval_queue import get_pending, approve, decline, mark_executed
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -116,6 +117,48 @@ def bot_start(dry_run: bool = False, _: str = Depends(verify)) -> dict[str, Any]
 @app.post("/api/bot/stop")
 def bot_stop(_: str = Depends(verify)) -> dict[str, Any]:
     return bot_manager.stop()
+
+
+@app.get("/api/pending-trades")
+def pending_trades(_: str = Depends(verify)) -> dict[str, Any]:
+    """List IPO trades awaiting human approval."""
+    return {"trades": get_pending()}
+
+
+@app.post("/api/pending-trades/{approval_id}/approve")
+def approve_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
+    """Approve an IPO trade and place the bracket order immediately."""
+    entry = approve(approval_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Approval not found or already decided")
+    try:
+        order_id = place_bracket_order(
+            symbol=entry["symbol"],
+            qty=entry["shares"],
+            stop_loss_price=entry["stop_loss"],
+            take_profit_price=entry["take_profit"],
+        )
+        if order_id:
+            Portfolio().open_trade(
+                symbol=entry["symbol"],
+                shares=entry["shares"],
+                entry_price=entry["price"],
+                stop_loss=entry["stop_loss"],
+                take_profit=entry["take_profit"],
+                order_id=order_id,
+            )
+            mark_executed(approval_id)
+        return {"message": f"Approved and ordered: {entry['symbol']}", "order_id": order_id}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/pending-trades/{approval_id}/decline")
+def decline_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
+    """Decline an IPO trade."""
+    if not decline(approval_id):
+        raise HTTPException(status_code=404, detail="Approval not found or already decided")
+    return {"message": "Trade declined"}
 
 
 @app.get("/api/logs")

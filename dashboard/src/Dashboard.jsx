@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -311,6 +311,107 @@ function TradesTable({ trades }) {
   )
 }
 
+// ------------------------------------------------------------------ IPO Approval Panel
+
+function Countdown({ expiresAt }) {
+  const [left, setLeft] = useState('')
+
+  useEffect(() => {
+    const tick = () => {
+      const diff = new Date(expiresAt) - Date.now()
+      if (diff <= 0) { setLeft('Executing now…'); return }
+      const m = Math.floor(diff / 60000)
+      const s = Math.floor((diff % 60000) / 1000)
+      setLeft(`${m}m ${s.toString().padStart(2, '0')}s`)
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [expiresAt])
+
+  return <span className="countdown">{left}</span>
+}
+
+function IPOApprovalPanel() {
+  const [trades, setTrades] = useState([])
+  const [acting, setActing] = useState({})
+
+  const load = () =>
+    fetchPendingTrades()
+      .then(r => setTrades(r.data.trades))
+      .catch(() => {})
+
+  useEffect(() => {
+    load()
+    const id = setInterval(load, 15_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const handle = async (id, action) => {
+    setActing(a => ({ ...a, [id]: action }))
+    try {
+      action === 'approve' ? await approveTrade(id) : await declineTrade(id)
+      await load()
+    } catch (e) {
+      alert(e.response?.data?.detail || e.message)
+    } finally {
+      setActing(a => ({ ...a, [id]: null }))
+    }
+  }
+
+  if (trades.length === 0) return null
+
+  return (
+    <div className="card ipo-panel">
+      <h2>
+        IPO Trade Approvals
+        <span className="count-badge">{trades.length}</span>
+        <span className="ipo-panel-sub">Auto-executes if no response within 60 min</span>
+      </h2>
+      {trades.map(t => (
+        <div key={t.id} className="ipo-card">
+          <div className="ipo-card-header">
+            <span className="ipo-symbol">{t.symbol}</span>
+            <span className="badge badge-ipo">{t.trade_type}</span>
+            <span className="ipo-score">score {t.score}</span>
+            <span className="ipo-timer">
+              Auto-executes in <Countdown expiresAt={t.expires_at} />
+            </span>
+          </div>
+          {t.headline && (
+            <div className="ipo-headline">"{t.headline}"</div>
+          )}
+          <div className="ipo-details">
+            <span>{t.shares} shares @ {fmt$(t.price)}</span>
+            <span className="muted">·</span>
+            <span>SL <span className="red">{fmt$(t.stop_loss)}</span></span>
+            <span className="muted">·</span>
+            <span>TP <span className="green">{fmt$(t.take_profit)}</span></span>
+            <span className="muted">·</span>
+            <span>Cost <strong>{fmt$(t.shares * t.price)}</strong></span>
+          </div>
+          <div className="ipo-actions">
+            <button
+              className="btn btn-primary"
+              disabled={!!acting[t.id]}
+              onClick={() => handle(t.id, 'approve')}
+            >
+              {acting[t.id] === 'approve' ? '…' : '✓ Accept'}
+            </button>
+            <button
+              className="btn btn-danger"
+              disabled={!!acting[t.id]}
+              onClick={() => handle(t.id, 'decline')}
+            >
+              {acting[t.id] === 'decline' ? '…' : '✗ Decline'}
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ Dashboard
 
 // ------------------------------------------------------------------ LogViewer
@@ -397,6 +498,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
 
       <main className="main">
         <StatsRow account={account} summary={summary} posCount={Object.keys(positions).length} />
+        <IPOApprovalPanel />
         <EquityChart snapshots={equityCurve} />
         <div className="tables-grid">
           <PositionsTable positions={positions} />

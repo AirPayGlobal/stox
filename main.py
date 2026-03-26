@@ -40,6 +40,7 @@ from analysis.ipo_tracker import (
     generate_ipo_signal,
     ipo_position_size,
 )
+from trading.approval_queue import submit as queue_approval, get_expired, mark_executed
 from utils.logger import get_logger
 
 logger = get_logger("main")
@@ -125,6 +126,12 @@ class TradingBot:
         if self.risk.max_positions_reached(len(open_positions)):
             logger.info("Max positions reached — not opening new trades.")
             return
+
+        # --- Auto-execute expired IPO approvals (user didn't respond in 60 min) ---
+        try:
+            self._auto_execute_expired_approvals()
+        except Exception as exc:
+            logger.warning(f"Auto-execute check failed: {exc}")
 
         # --- IPO discovery: register new listings from news ---
         try:
@@ -276,28 +283,63 @@ class TradingBot:
                 )
 
                 if not self.dry_run:
-                    order_id = place_bracket_order(
+                    # Queue for human approval (60 min window before auto-execute)
+                    from analysis.news_scanner import _fetch_articles
+                    articles = _fetch_articles(symbols=[symbol], hours=24, limit=1)
+                    headline = articles[0].headline if articles else ""
+                    queue_approval(
                         symbol=symbol,
-                        qty=shares,
-                        stop_loss_price=stop_loss,
-                        take_profit_price=take_profit,
+                        shares=shares,
+                        price=price,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        score=score,
+                        headline=headline,
+                        trade_type="IPO",
                     )
-                    if order_id:
-                        self.portfolio.open_trade(
-                            symbol=symbol,
-                            shares=shares,
-                            entry_price=price,
-                            stop_loss=stop_loss,
-                            take_profit=take_profit,
-                            order_id=order_id,
-                        )
-                        self.risk.record_trade()
-                        cash -= cost
                 else:
-                    logger.info(f"[DRY RUN] IPO: Would BUY {shares} {symbol} @ ${price:.2f}")
+                    logger.info(f"[DRY RUN] IPO: Would queue approval for {shares} {symbol} @ ${price:.2f}")
 
             except Exception as exc:
                 logger.error(f"IPO trade error for {symbol}: {exc}")
+
+    def _execute_approved(self, entry: dict, auto: bool = False) -> None:
+        """Place a bracket order for an approved (or auto-expired) IPO trade."""
+        symbol = entry["symbol"]
+        label = "Auto-executing" if auto else "Executing approved"
+        logger.info(f"{label} IPO trade: {symbol} x{entry['shares']} @ ${entry['price']:.2f}")
+        order_id = place_bracket_order(
+            symbol=symbol,
+            qty=entry["shares"],
+            stop_loss_price=entry["stop_loss"],
+            take_profit_price=entry["take_profit"],
+        )
+        if order_id:
+            self.portfolio.open_trade(
+                symbol=symbol,
+                shares=entry["shares"],
+                entry_price=entry["price"],
+                stop_loss=entry["stop_loss"],
+                take_profit=entry["take_profit"],
+                order_id=order_id,
+            )
+            self.risk.record_trade()
+            mark_executed(entry["id"], auto=auto)
+
+    def _auto_execute_expired_approvals(self) -> None:
+        """Auto-execute any IPO trades whose 60-min approval window has elapsed."""
+        expired = get_expired()
+        if not expired:
+            return
+        open_positions = get_positions()
+        for entry in expired:
+            symbol = entry["symbol"]
+            if symbol in open_positions:
+                mark_executed(entry["id"], auto=True)
+                continue
+            if self.risk.max_positions_reached(len(get_positions())):
+                break
+            self._execute_approved(entry, auto=True)
 
     def _check_exits(self, open_positions: dict, equity: float) -> None:
         """

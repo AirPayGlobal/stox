@@ -38,3 +38,15 @@ export async function stopBot() {
 export async function fetchLogs(lines = 100) {
   return client.get(`/api/logs?lines=${lines}`)
 }
+
+export async function fetchPendingTrades() {
+  return client.get('/api/pending-trades')
+}
+
+export async function approveTrade(id) {
+  return client.post(`/api/pending-trades/${id}/approve`)
+}
+
+export async function declineTrade(id) {
+  return client.post(`/api/pending-trades/${id}/decline`)
+}
