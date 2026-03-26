@@ -23,7 +23,7 @@ Catalyst categories that earn extra weight
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Optional
 
 from config import Config
@@ -102,14 +102,6 @@ def score_headline(headline: str) -> int:
 # News fetching helpers
 # ---------------------------------------------------------------------------
 
-def _get_news_client():
-    from alpaca.data.historical import StockHistoricalDataClient
-    return StockHistoricalDataClient(
-        api_key=Config.ALPACA_API_KEY,
-        secret_key=Config.ALPACA_API_SECRET,
-    )
-
-
 def _fetch_articles(symbols: Optional[list[str]] = None, hours: int = 24, limit: int = 50):
     """
     Fetch news articles from Alpaca.
@@ -117,17 +109,8 @@ def _fetch_articles(symbols: Optional[list[str]] = None, hours: int = 24, limit:
     Returns list of article objects.
     """
     try:
-        from alpaca.data.requests import NewsRequest
-        client = _get_news_client()
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(hours=hours)
-
-        kwargs = dict(start=start, end=end, limit=limit)
-        if symbols:
-            kwargs["symbols"] = symbols
-
-        response = client.get_news(NewsRequest(**kwargs))
-        return getattr(response, "news", [])
+        from data.news import fetch_news
+        return fetch_news(symbols=symbols, hours=hours, limit=limit)
     except Exception as exc:
         logger.warning(f"News fetch failed: {exc}")
         return []

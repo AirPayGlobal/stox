@@ -99,26 +99,8 @@ def get_news_sentiment(symbol: str, days: int = 3) -> float:
     Falls back to 0.0 on any API error.
     """
     try:
-        from alpaca.data.historical import StockHistoricalDataClient
-        from alpaca.data.requests import NewsRequest
-
-        client = StockHistoricalDataClient(
-            api_key=Config.ALPACA_API_KEY,
-            secret_key=Config.ALPACA_API_SECRET,
-        )
-
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(days=days)
-
-        request = NewsRequest(
-            symbols=[symbol],
-            start=start,
-            end=end,
-            limit=20,
-        )
-        news = client.get_news(request)
-
-        articles = news.news if hasattr(news, "news") else []
+        from data.news import fetch_news
+        articles = fetch_news(symbols=[symbol], hours=days * 24, limit=20)
         if not articles:
             logger.debug(f"No recent news for {symbol}")
             return 0.0
@@ -127,7 +109,7 @@ def get_news_sentiment(symbol: str, days: int = 3) -> float:
         avg = sum(scores) / len(scores)
         logger.info(
             f"News sentiment for {symbol}: {avg:+.2f} "
-            f"({len(articles)} articles, last 3 days)"
+            f"({len(articles)} articles, last {days} days)"
         )
         return avg
 

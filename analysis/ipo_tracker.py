@@ -84,17 +84,8 @@ def scan_ipo_news(hours: int = 48) -> list[tuple[str, str]]:
     Returns list of (symbol, headline) for newly detected IPOs.
     """
     try:
-        from alpaca.data.historical import StockHistoricalDataClient
-        from alpaca.data.requests import NewsRequest
-
-        client = StockHistoricalDataClient(
-            api_key=Config.ALPACA_API_KEY,
-            secret_key=Config.ALPACA_API_SECRET,
-        )
-        end = datetime.now(timezone.utc)
-        start = end - timedelta(hours=hours)
-        response = client.get_news(NewsRequest(start=start, end=end, limit=100))
-        articles = getattr(response, "news", [])
+        from data.news import fetch_news
+        articles = fetch_news(hours=hours, limit=50)
     except Exception as exc:
         logger.warning(f"IPO news scan failed: {exc}")
         return []
