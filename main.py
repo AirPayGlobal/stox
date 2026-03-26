@@ -52,6 +52,10 @@ from analysis.pairs_trading import screen_pairs, pair_position_sizes, PairSignal
 from trading.pairs_manager import (
     get_open_pairs, open_pair as record_open_pair, close_pair as record_close_pair,
 )
+from analysis.regime import detect_regime, get_sizing_multiplier, regime_allows_longs, regime_favors_shorts, Regime
+from analysis.ml_signals import is_ml_approved
+from analysis.universe import get_full_universe
+from analysis.risk_analytics import record_equity, compute_analytics
 from utils.logger import get_logger
 
 logger = get_logger("main")
@@ -162,6 +166,14 @@ class TradingBot:
             logger.warning("VIX filter active — no new BUY entries this scan.")
             return
 
+        # Regime detection — log regime and block HIGH_VOL entries
+        regime = detect_regime()
+        sizing_mult = get_sizing_multiplier()
+        logger.info(f"Market regime: {regime.value} (sizing multiplier: {sizing_mult:.1f}x)")
+        if Config.REGIME_FILTER_ENABLED and not regime_allows_longs():
+            logger.warning(f"Regime {regime.value} — no new long entries this scan.")
+            return
+
         open_positions = get_positions()
         pending_symbols = get_pending_symbols()
         open_symbols = set(open_positions.keys()) | pending_symbols
@@ -210,9 +222,14 @@ class TradingBot:
         except Exception as exc:
             logger.warning(f"News catalyst scan failed: {exc}")
 
-        # Fetch latest data for watchlist + any news-discovered symbols
-        scan_symbols = Config.WATCHLIST + news_symbols
-        logger.info(f"Scanning {len(scan_symbols)} symbols ({len(news_symbols)} from news)...")
+        # Build scan universe: static watchlist + dynamic breakouts + news catalysts
+        base_universe = get_full_universe()
+        scan_symbols = base_universe + [s for s in news_symbols if s not in base_universe]
+        dynamic_extra = len(base_universe) - len(Config.WATCHLIST)
+        logger.info(
+            f"Scanning {len(scan_symbols)} symbols "
+            f"({dynamic_extra} dynamic breakouts, {len(news_symbols)} from news)..."
+        )
         data = fetch_batch(scan_symbols, lookback_days=100)
 
         # Screen for signals
@@ -293,6 +310,12 @@ class TradingBot:
             if df_ind.empty:
                 continue
 
+            # ML signal booster — require minimum probability estimate
+            if Config.ML_SIGNAL_ENABLED:
+                if not is_ml_approved(symbol, df, Config.ML_MIN_PROBABILITY):
+                    logger.info(f"ML filter blocked {symbol} (below p={Config.ML_MIN_PROBABILITY:.2f})")
+                    continue
+
             latest = df_ind.iloc[-1]
             price = float(latest["close"])
             atr = float(latest["atr"])
@@ -303,6 +326,11 @@ class TradingBot:
                 atr=atr,
                 **kelly_kwargs,
             )
+
+            # Regime sizing multiplier — reduce position size in choppy/bear markets
+            if Config.REGIME_FILTER_ENABLED and sizing_mult < 1.0:
+                shares = max(1, int(shares * sizing_mult))
+                logger.debug(f"Regime {regime.value}: {symbol} shares scaled to {shares}")
 
             # Ensure we have enough cash
             cost = price * shares
@@ -775,17 +803,37 @@ class TradingBot:
                 logger.error(f"Exit check error for {symbol}: {exc}")
 
     def eod_summary(self) -> None:
-        """End-of-day summary."""
+        """End-of-day summary with risk analytics."""
         logger.info("=== END OF DAY SUMMARY ===")
         try:
-            account = get_account()
+            account   = get_account()
             positions = get_positions()
+            equity    = account["equity"]
+
             self.portfolio.take_snapshot(
-                equity=account["equity"],
+                equity=equity,
                 cash=account["cash"],
                 open_positions=len(positions),
             )
             self.portfolio.print_summary()
+
+            # Record equity for risk analytics
+            record_equity(equity)
+
+            # Log key risk metrics
+            try:
+                metrics = compute_analytics(portfolio=self.portfolio)
+                parts = []
+                if metrics["sharpe"]           is not None: parts.append(f"Sharpe={metrics['sharpe']:.2f}")
+                if metrics["sortino"]          is not None: parts.append(f"Sortino={metrics['sortino']:.2f}")
+                if metrics["max_drawdown_pct"] is not None: parts.append(f"MaxDD={metrics['max_drawdown_pct']:.1f}%")
+                if metrics["win_rate"]         is not None: parts.append(f"WinRate={metrics['win_rate']:.1f}%")
+                if metrics["profit_factor"]    is not None: parts.append(f"PF={metrics['profit_factor']:.2f}x")
+                if parts:
+                    logger.info("Risk metrics: " + " | ".join(parts))
+            except Exception as exc:
+                logger.debug(f"Risk analytics error: {exc}")
+
         except Exception as exc:
             logger.error(f"EoD summary failed: {exc}")
 

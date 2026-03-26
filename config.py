@@ -97,5 +97,16 @@ class Config:
     PAIRS_EXIT_ZSCORE: float   = float(os.getenv("PAIRS_EXIT_ZSCORE", "0.5"))    # exit when |z| < this
     PAIRS_STOP_ZSCORE: float   = float(os.getenv("PAIRS_STOP_ZSCORE", "3.5"))    # stop loss when |z| > this
 
+    # --- Tier 3: Volatility Regime ---
+    REGIME_FILTER_ENABLED: bool = os.getenv("REGIME_FILTER_ENABLED", "true").lower() != "false"
+
+    # --- Tier 3: ML Signal Booster ---
+    ML_SIGNAL_ENABLED: bool  = os.getenv("ML_SIGNAL_ENABLED", "true").lower() != "false"
+    ML_MIN_PROBABILITY: float = float(os.getenv("ML_MIN_PROBABILITY", "0.52"))  # block entries below this confidence
+
+    # --- Tier 3: Dynamic Universe ---
+    DYNAMIC_UNIVERSE_ENABLED: bool = os.getenv("DYNAMIC_UNIVERSE_ENABLED", "true").lower() != "false"
+    DYNAMIC_UNIVERSE_TOP_N: int    = int(os.getenv("DYNAMIC_UNIVERSE_TOP_N", "10"))  # max extra symbols per scan
+
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

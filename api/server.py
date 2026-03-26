@@ -178,6 +178,21 @@ def decline_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
     return {"message": "Trade declined"}
 
 
+@app.get("/api/analytics")
+def analytics(_: str = Depends(verify)) -> dict[str, Any]:
+    """Portfolio risk metrics: Sharpe, Sortino, drawdown, VaR, equity curve."""
+    from analysis.risk_analytics import compute_analytics
+    p = Portfolio()
+    return compute_analytics(portfolio=p)
+
+
+@app.get("/api/regime")
+def regime(_: str = Depends(verify)) -> dict[str, Any]:
+    """Current market regime (BULL / RANGING / HIGH_VOL / BEAR) with metrics."""
+    from analysis.regime import get_regime_detail
+    return get_regime_detail()
+
+
 @app.get("/api/logs")
 def get_logs(_: str = Depends(verify), lines: int = 100) -> dict[str, Any]:
     from datetime import datetime

@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -40,6 +40,40 @@ function PnlCell({ value }) {
   return <span className={cls}>{fmt$(value)}</span>
 }
 
+// ------------------------------------------------------------------ Regime badge
+
+const REGIME_COLORS = {
+  BULL:     'regime-bull',
+  RANGING:  'regime-ranging',
+  HIGH_VOL: 'regime-highvol',
+  BEAR:     'regime-bear',
+}
+
+function RegimeBadge() {
+  const [regime, setRegime] = useState(null)
+
+  useEffect(() => {
+    const load = () =>
+      fetchRegime()
+        .then(r => setRegime(r.data))
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 300_000) // refresh every 5 min
+    return () => clearInterval(id)
+  }, [])
+
+  if (!regime) return null
+
+  return (
+    <span
+      className={`badge regime-badge ${REGIME_COLORS[regime.regime] || ''}`}
+      title={`VIX ${regime.vix ?? '?'} · ADX ${regime.adx ?? '?'} · SPY ${regime.above_200 ? 'above' : 'below'} 200SMA`}
+    >
+      {regime.regime}
+    </span>
+  )
+}
+
 // ------------------------------------------------------------------ Header
 
 function Header({ account, botStatus, onToggle, toggleLoading, onLogout, onRefresh }) {
@@ -56,6 +90,7 @@ function Header({ account, botStatus, onToggle, toggleLoading, onLogout, onRefre
           {mode}
         </span>
         {isDry && <span className="badge badge-dry">DRY RUN</span>}
+        <RegimeBadge />
       </div>
 
       <div className="header-right">
@@ -513,7 +548,133 @@ function IPOApprovalPanel() {
   )
 }
 
-// ------------------------------------------------------------------ Dashboard
+// ------------------------------------------------------------------ Analytics Panel
+
+function AnalyticsPanel() {
+  const [data, setData] = useState(null)
+  const [open, setOpen] = useState(true)
+
+  useEffect(() => {
+    const load = () =>
+      fetchAnalytics()
+        .then(r => setData(r.data))
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  if (!data || data.days_tracked < 5) return null
+
+  const curve = data.equity_curve || []
+  const minV  = curve.length ? Math.min(...curve.map(d => d.equity)) : 0
+  const maxV  = curve.length ? Math.max(...curve.map(d => d.equity)) : 0
+  const pad   = (maxV - minV) * 0.12 || 100
+
+  return (
+    <div className="card analytics-panel">
+      <div className="pairs-header" onClick={() => setOpen(o => !o)}>
+        <h2>
+          Risk Analytics
+          <span className="count-badge">{data.days_tracked}d</span>
+        </h2>
+        <span className="log-toggle">{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <>
+          <div className="analytics-metrics">
+            <div className="analytics-metric">
+              <span className="analytics-label">Sharpe</span>
+              <span className={`analytics-value ${data.sharpe >= 1 ? 'green' : data.sharpe < 0 ? 'red' : ''}`}>
+                {data.sharpe ?? '—'}
+              </span>
+            </div>
+            <div className="analytics-metric">
+              <span className="analytics-label">Sortino</span>
+              <span className={`analytics-value ${data.sortino >= 1 ? 'green' : data.sortino < 0 ? 'red' : ''}`}>
+                {data.sortino ?? '—'}
+              </span>
+            </div>
+            <div className="analytics-metric">
+              <span className="analytics-label">Calmar</span>
+              <span className={`analytics-value ${data.calmar >= 0.5 ? 'green' : ''}`}>
+                {data.calmar ?? '—'}
+              </span>
+            </div>
+            <div className="analytics-metric">
+              <span className="analytics-label">Max DD</span>
+              <span className="analytics-value red">
+                {data.max_drawdown_pct != null ? `${data.max_drawdown_pct}%` : '—'}
+              </span>
+            </div>
+            <div className="analytics-metric">
+              <span className="analytics-label">VaR 95%</span>
+              <span className="analytics-value">
+                {data.var_95_pct != null ? `${data.var_95_pct}%` : '—'}
+              </span>
+            </div>
+            <div className="analytics-metric">
+              <span className="analytics-label">Total Return</span>
+              <span className={`analytics-value ${data.total_return_pct >= 0 ? 'green' : 'red'}`}>
+                {data.total_return_pct != null ? `${data.total_return_pct}%` : '—'}
+              </span>
+            </div>
+            {data.win_rate != null && (
+              <div className="analytics-metric">
+                <span className="analytics-label">Win Rate</span>
+                <span className="analytics-value">{data.win_rate}%</span>
+              </div>
+            )}
+            {data.profit_factor != null && (
+              <div className="analytics-metric">
+                <span className="analytics-label">Profit Factor</span>
+                <span className={`analytics-value ${data.profit_factor >= 1.5 ? 'green' : data.profit_factor < 1 ? 'red' : ''}`}>
+                  {data.profit_factor}x
+                </span>
+              </div>
+            )}
+          </div>
+
+          {curve.length >= 3 && (
+            <ResponsiveContainer width="100%" height={160}>
+              <AreaChart data={curve} margin={{ top: 4, right: 16, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="anlGrad" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%"  stopColor="#3fb950" stopOpacity={0.25} />
+                    <stop offset="95%" stopColor="#3fb950" stopOpacity={0}    />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#21262d" />
+                <XAxis dataKey="date" stroke="#8b949e" tick={{ fontSize: 10 }} />
+                <YAxis
+                  stroke="#8b949e"
+                  tick={{ fontSize: 10 }}
+                  domain={[minV - pad, maxV + pad]}
+                  tickFormatter={v => `$${(v / 1000).toFixed(1)}K`}
+                  width={58}
+                />
+                <Tooltip
+                  formatter={v => [fmt$(v), 'Equity']}
+                  contentStyle={{ background: '#161b22', border: '1px solid #30363d', fontSize: 12 }}
+                  labelStyle={{ color: '#8b949e' }}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="equity"
+                  stroke="#3fb950"
+                  fill="url(#anlGrad)"
+                  strokeWidth={2}
+                  dot={false}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
 
 // ------------------------------------------------------------------ LogViewer
 
@@ -601,6 +762,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
         <StatsRow account={account} summary={summary} posCount={Object.keys(positions).length} />
         <IPOApprovalPanel />
         <PairsPanel />
+        <AnalyticsPanel />
         <EquityChart snapshots={equityCurve} />
         <div className="tables-grid">
           <PositionsTable positions={positions} />

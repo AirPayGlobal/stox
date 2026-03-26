@@ -54,3 +54,11 @@ export async function declineTrade(id) {
 export async function fetchPairs() {
   return client.get('/api/pairs')
 }
+
+export async function fetchAnalytics() {
+  return client.get('/api/analytics')
+}
+
+export async function fetchRegime() {
+  return client.get('/api/regime')
+}
