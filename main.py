@@ -34,6 +34,12 @@ from trading.portfolio import Portfolio
 from strategy.ema_rsi_macd import EmaRsiMacdStrategy
 from analysis.market_filter import is_vix_too_high, is_sentiment_negative
 from analysis.news_scanner import find_news_catalysts, apply_news_boost
+from analysis.ipo_tracker import (
+    register_new_ipos,
+    get_tradeable_ipos,
+    generate_ipo_signal,
+    ipo_position_size,
+)
 from utils.logger import get_logger
 
 logger = get_logger("main")
@@ -119,6 +125,14 @@ class TradingBot:
         if self.risk.max_positions_reached(len(open_positions)):
             logger.info("Max positions reached — not opening new trades.")
             return
+
+        # --- IPO discovery: register new listings from news ---
+        try:
+            new_ipos = register_new_ipos(hours=48)
+            if new_ipos:
+                logger.info(f"New IPOs detected and quarantined: {new_ipos}")
+        except Exception as exc:
+            logger.warning(f"IPO registration failed: {exc}")
 
         # --- News catalyst discovery (symbols not necessarily in watchlist) ---
         news_symbols = []
@@ -214,6 +228,76 @@ class TradingBot:
                     cash -= cost
             else:
                 logger.info(f"[DRY RUN] Would place: BUY {shares} {symbol} @ ${price:.2f}")
+
+        # --- IPO pass: trade mature IPOs with lightweight momentum signal ---
+        if not self.risk.max_positions_reached(len(get_positions())):
+            self._trade_ipos(open_symbols, equity, cash)
+
+    def _trade_ipos(self, open_symbols: set, equity: float, cash: float) -> None:
+        """
+        Separate trading pass for recently listed IPOs.
+        Uses a lightweight momentum signal instead of the full indicator suite.
+        """
+        tradeable = get_tradeable_ipos()
+        if not tradeable:
+            return
+
+        from data.fetcher import fetch_bars
+        logger.info(f"Checking {len(tradeable)} mature IPOs: {tradeable}")
+
+        for symbol in tradeable:
+            if self.risk.max_positions_reached(len(get_positions())):
+                break
+            if symbol in open_symbols:
+                continue
+            if is_sentiment_negative(symbol):
+                continue
+
+            try:
+                df = fetch_bars(symbol, lookback_days=30)
+                if df.empty or len(df) < 6:
+                    continue
+
+                signal, score = generate_ipo_signal(df)
+                if signal != "BUY":
+                    continue
+
+                price = float(df["close"].iloc[-1])
+                shares, stop_loss, take_profit = ipo_position_size(equity, price)
+                cost = price * shares
+
+                if cost > cash * 0.95:
+                    logger.info(f"IPO {symbol}: insufficient cash (need ${cost:.0f})")
+                    continue
+
+                logger.info(
+                    f"IPO Signal: BUY {symbol} | score={score} | "
+                    f"x{shares} @ ${price:.2f} | SL=${stop_loss:.2f} TP=${take_profit:.2f}"
+                )
+
+                if not self.dry_run:
+                    order_id = place_bracket_order(
+                        symbol=symbol,
+                        qty=shares,
+                        stop_loss_price=stop_loss,
+                        take_profit_price=take_profit,
+                    )
+                    if order_id:
+                        self.portfolio.open_trade(
+                            symbol=symbol,
+                            shares=shares,
+                            entry_price=price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            order_id=order_id,
+                        )
+                        self.risk.record_trade()
+                        cash -= cost
+                else:
+                    logger.info(f"[DRY RUN] IPO: Would BUY {shares} {symbol} @ ${price:.2f}")
+
+            except Exception as exc:
+                logger.error(f"IPO trade error for {symbol}: {exc}")
 
     def _check_exits(self, open_positions: dict, equity: float) -> None:
         """

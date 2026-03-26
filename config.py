@@ -54,5 +54,10 @@ class Config:
     VIX_THRESHOLD: float = float(os.getenv("VIX_THRESHOLD", "25"))   # skip buys when VIX > this
     MIN_SENTIMENT_SCORE: float = float(os.getenv("MIN_SENTIMENT_SCORE", "-0.2"))  # skip if avg headline score < this
 
+    # IPO tracking
+    IPO_MIN_DAYS: int = int(os.getenv("IPO_MIN_DAYS", "5"))              # quarantine days before trading
+    IPO_POSITION_SCALE: float = float(os.getenv("IPO_POSITION_SCALE", "0.5"))   # 50% of normal size
+    IPO_STOP_LOSS_PCT: float = float(os.getenv("IPO_STOP_LOSS_PCT", "0.04"))    # 4% stop (wider than normal 2%)
+
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
