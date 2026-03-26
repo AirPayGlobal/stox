@@ -50,6 +50,15 @@ class Config:
         "NKE", "PM", "LIN", "BMY", "RTX", "QCOM", "AMGN", "UPS", "SBUX",
     ]
 
+    # Trailing stop
+    TRAILING_STOP_PCT: float = float(os.getenv("TRAILING_STOP_PCT", "0.06"))   # close if price drops 6% from peak
+
+    # Earnings blackout
+    EARNINGS_BLACKOUT_DAYS: int = int(os.getenv("EARNINGS_BLACKOUT_DAYS", "2"))  # skip entry within N days of earnings
+
+    # Correlation limit
+    MAX_POSITION_CORRELATION: float = float(os.getenv("MAX_POSITION_CORRELATION", "0.7"))  # skip if r > this with any open position
+
     # Market filters
     VIX_THRESHOLD: float = float(os.getenv("VIX_THRESHOLD", "25"))   # skip buys when VIX > this
     MIN_SENTIMENT_SCORE: float = float(os.getenv("MIN_SENTIMENT_SCORE", "-0.2"))  # skip if avg headline score < this

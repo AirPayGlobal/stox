@@ -33,7 +33,8 @@ class Trade:
     closed_at: Optional[str] = None
     pnl: Optional[float] = None
     pnl_pct: Optional[float] = None
-    status: str = "OPEN"  # OPEN | CLOSED | STOPPED | TOOK_PROFIT
+    status: str = "OPEN"  # OPEN | CLOSED | STOPPED | TOOK_PROFIT | TRAILING_STOP
+    high_water_mark: float = 0.0  # highest price seen since entry (trailing stop reference)
 
 
 @dataclass
@@ -110,6 +111,13 @@ class Portfolio:
         self.save()
         logger.info(f"Opened trade: {symbol} x{shares} @ {entry_price:.2f}")
         return trade
+
+    def get_open_trade(self, symbol: str) -> Optional[Trade]:
+        """Return the most recent open trade for a symbol, or None."""
+        for trade in reversed(self.trades):
+            if trade.symbol == symbol and trade.status == "OPEN":
+                return trade
+        return None
 
     def close_trade(
         self,

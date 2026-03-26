@@ -34,6 +34,7 @@ from trading.portfolio import Portfolio
 from strategy.ema_rsi_macd import EmaRsiMacdStrategy
 from analysis.market_filter import is_vix_too_high, is_sentiment_negative
 from analysis.news_scanner import find_news_catalysts, apply_news_boost
+from analysis.earnings_calendar import is_earnings_blackout, warn_open_positions_near_earnings
 from analysis.ipo_tracker import (
     register_new_ipos,
     get_tradeable_ipos,
@@ -44,6 +45,44 @@ from trading.approval_queue import submit as queue_approval, get_expired, mark_e
 from utils.logger import get_logger
 
 logger = get_logger("main")
+
+
+def _position_returns(open_positions: dict, data: dict) -> dict:
+    """
+    Build a dict of {symbol: pd.Series of daily returns} for all open positions
+    that have price data available. Used by the correlation check.
+    """
+    import pandas as pd
+    result = {}
+    for sym in open_positions:
+        if sym in data and not data[sym].empty:
+            result[sym] = data[sym]["close"].pct_change().dropna()
+    return result
+
+
+def _is_too_correlated(symbol: str, data: dict, open_returns: dict) -> bool:
+    """
+    Return True if the candidate symbol's 30-day returns are correlated > MAX_POSITION_CORRELATION
+    with any currently open position. Prevents loading up on highly correlated tech names.
+    """
+    if not open_returns or symbol not in data or data[symbol].empty:
+        return False
+
+    import pandas as pd
+    candidate_ret = data[symbol]["close"].pct_change().dropna().tail(30)
+
+    for pos_sym, pos_ret in open_returns.items():
+        aligned = pd.concat([candidate_ret, pos_ret.tail(30)], axis=1).dropna()
+        if len(aligned) < 10:
+            continue
+        corr = aligned.iloc[:, 0].corr(aligned.iloc[:, 1])
+        if corr > Config.MAX_POSITION_CORRELATION:
+            logger.info(
+                f"Correlation limit: {symbol} vs {pos_sym} r={corr:.2f} "
+                f"> {Config.MAX_POSITION_CORRELATION} — skipping"
+            )
+            return True
+    return False
 
 
 def print_banner() -> None:
@@ -180,12 +219,23 @@ class TradingBot:
 
         logger.info(f"Buy candidates: {len(buy_candidates)}")
 
+        # Pre-compute returns for open positions (used in correlation check)
+        open_returns = _position_returns(open_positions, data)
+
         for symbol, signal, score in buy_candidates:
             if self.risk.max_positions_reached(len(get_positions())):
                 break
 
             # News sentiment filter — skip symbols with recent negative headlines
             if is_sentiment_negative(symbol):
+                continue
+
+            # Earnings blackout — skip if reporting in ≤ EARNINGS_BLACKOUT_DAYS
+            if is_earnings_blackout(symbol):
+                continue
+
+            # Correlation limit — skip if too correlated with any open position
+            if _is_too_correlated(symbol, data, open_returns):
                 continue
 
             df = data[symbol]
@@ -343,26 +393,60 @@ class TradingBot:
 
     def _check_exits(self, open_positions: dict, equity: float) -> None:
         """
-        Signal-based exit check for existing positions.
-        Bracket orders handle SL/TP automatically on the broker side;
-        this function handles signal-based exits (e.g. death cross).
+        Exit checks for existing positions:
+          1. Trailing stop  — close if price drops > TRAILING_STOP_PCT from peak
+          2. Signal exit    — close on EMA death cross / SELL signal
+          3. Earnings warn  — log alert when earnings < 3 days away
+        Bracket orders still handle the hard SL/TP on the broker side.
         """
-        from data.fetcher import fetch_bars
+        from data.fetcher import fetch_bars, fetch_latest_price
+
+        # Warn about any open positions approaching earnings
+        warn_open_positions_near_earnings(list(open_positions.keys()), days_before=3)
+
         for symbol, pos in open_positions.items():
             try:
                 df = fetch_bars(symbol, lookback_days=100)
                 if df.empty:
                     continue
+
+                current_price = pos["market_value"] / pos["qty"] if pos["qty"] else float(df["close"].iloc[-1])
+
+                # --- Trailing stop ---
+                trade = self.portfolio.get_open_trade(symbol)
+                if trade:
+                    # Initialise high_water_mark on first check
+                    hwm = trade.high_water_mark or trade.entry_price
+                    if current_price > hwm:
+                        trade.high_water_mark = current_price
+                        self.portfolio.save()
+                        hwm = current_price
+
+                    trail_floor = hwm * (1 - Config.TRAILING_STOP_PCT)
+                    if current_price < trail_floor:
+                        logger.info(
+                            f"Trailing stop: {symbol} price=${current_price:.2f} "
+                            f"peak=${hwm:.2f} floor=${trail_floor:.2f} "
+                            f"({Config.TRAILING_STOP_PCT:.0%} trail)"
+                        )
+                        if not self.dry_run:
+                            if close_position(symbol):
+                                self.portfolio.close_trade(symbol, current_price, status="TRAILING_STOP")
+                        else:
+                            logger.info(f"[DRY RUN] Would trailing-stop {symbol}")
+                        continue  # skip signal check for this symbol
+
+                # --- Signal-based exit (death cross / SELL) ---
                 signal, score = self.strategy.generate_signal(df)
                 if signal == Signal.SELL:
                     logger.info(f"Exit signal for {symbol} (score={score})")
                     if not self.dry_run:
                         if close_position(symbol):
-                            from data.fetcher import fetch_latest_price
                             exit_price = fetch_latest_price(symbol) or pos["avg_entry"]
                             self.portfolio.close_trade(symbol, exit_price, status="SIGNAL_EXIT")
                     else:
                         logger.info(f"[DRY RUN] Would close {symbol}")
+
             except Exception as exc:
                 logger.error(f"Exit check error for {symbol}: {exc}")
 
