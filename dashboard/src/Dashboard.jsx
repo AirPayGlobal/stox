@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -676,6 +676,113 @@ function AnalyticsPanel() {
   )
 }
 
+// ------------------------------------------------------------------ Features Panel
+
+const TIER_COLORS = { 1: '#58a6ff', 2: '#bc8cff', 3: '#3fb950' }
+const TIER_LABELS = { 1: 'Tier 1', 2: 'Tier 2', 3: 'Tier 3' }
+
+const STATUS_ICON = {
+  active:   { icon: '●', cls: 'feat-active'   },
+  blocking: { icon: '◉', cls: 'feat-blocking' },
+  warmup:   { icon: '◎', cls: 'feat-warmup'   },
+  disabled: { icon: '○', cls: 'feat-disabled' },
+}
+
+function FeatureCard({ feature, tierColor }) {
+  const st = STATUS_ICON[feature.status] || STATUS_ICON.active
+  return (
+    <div className={`feat-card ${feature.enabled ? '' : 'feat-card-off'}`}>
+      <div className="feat-card-top">
+        <span className={`feat-dot ${st.cls}`} title={feature.status}>{st.icon}</span>
+        <span className="feat-name">{feature.name}</span>
+        <span
+          className={`feat-status-badge feat-status-${feature.status}`}
+        >
+          {feature.status}
+        </span>
+      </div>
+      <div className="feat-desc">{feature.description}</div>
+      <div className="feat-footer">
+        {feature.live && (
+          <span className="feat-live" style={{ color: tierColor }}>
+            ▸ {feature.live}
+          </span>
+        )}
+        <span className="feat-config">{feature.config}</span>
+      </div>
+    </div>
+  )
+}
+
+function FeaturesPanel() {
+  const [data, setData]   = useState(null)
+  const [open, setOpen]   = useState(false)
+
+  useEffect(() => {
+    const load = () =>
+      fetchFeatures()
+        .then(r => setData(r.data))
+        .catch(() => {})
+    load()
+    const id = setInterval(load, 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  if (!data) return null
+
+  const totalFeatures  = data.tiers.reduce((n, t) => n + t.features.length, 0)
+  const activeFeatures = data.tiers.reduce(
+    (n, t) => n + t.features.filter(f => f.status !== 'disabled').length, 0
+  )
+
+  return (
+    <div className="card feat-panel">
+      <div className="feat-panel-header" onClick={() => setOpen(o => !o)}>
+        <h2>
+          Strategy Features
+          <span className="count-badge">{activeFeatures} / {totalFeatures} active</span>
+        </h2>
+        <div className="feat-tier-pills">
+          {data.tiers.map(t => (
+            <span
+              key={t.tier}
+              className="feat-tier-pill"
+              style={{ borderColor: TIER_COLORS[t.tier], color: TIER_COLORS[t.tier] }}
+            >
+              {TIER_LABELS[t.tier]} · {t.features.length}
+            </span>
+          ))}
+        </div>
+        <span className="log-toggle">{open ? '▲' : '▼'}</span>
+      </div>
+
+      {open && (
+        <div className="feat-tiers">
+          {data.tiers.map(t => (
+            <div key={t.tier} className="feat-tier">
+              <div
+                className="feat-tier-heading"
+                style={{ borderLeftColor: TIER_COLORS[t.tier], color: TIER_COLORS[t.tier] }}
+              >
+                <span className="feat-tier-label">{TIER_LABELS[t.tier]}</span>
+                <span className="feat-tier-name">{t.label}</span>
+                <span className="feat-tier-count">
+                  {t.features.filter(f => f.status !== 'disabled').length} active
+                </span>
+              </div>
+              <div className="feat-grid">
+                {t.features.map(f => (
+                  <FeatureCard key={f.name} feature={f} tierColor={TIER_COLORS[t.tier]} />
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ LogViewer
 
 function LogViewer() {
@@ -762,6 +869,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
         <StatsRow account={account} summary={summary} posCount={Object.keys(positions).length} />
         <IPOApprovalPanel />
         <PairsPanel />
+        <FeaturesPanel />
         <AnalyticsPanel />
         <EquityChart snapshots={equityCurve} />
         <div className="tables-grid">

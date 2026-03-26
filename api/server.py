@@ -193,6 +193,236 @@ def regime(_: str = Depends(verify)) -> dict[str, Any]:
     return get_regime_detail()
 
 
+@app.get("/api/features")
+def features(_: str = Depends(verify)) -> dict[str, Any]:
+    """
+    Live status of every implemented feature across all tiers.
+    Returns config values, enabled state, and live metrics where available.
+    """
+    p = Portfolio()
+    summary = p.summary()
+    closed_count = summary.get("total_trades", 0)
+
+    # Live VIX
+    vix_val = None
+    try:
+        from analysis.market_filter import get_vix
+        vix_val = round(get_vix(), 1)
+    except Exception:
+        pass
+
+    # Live regime
+    regime_val = None
+    regime_detail = {}
+    try:
+        from analysis.regime import get_regime_detail
+        regime_detail = get_regime_detail()
+        regime_val = regime_detail.get("regime")
+    except Exception:
+        pass
+
+    # Sector top-4
+    top_sectors = []
+    try:
+        from analysis.sector_rotation import get_sector_rankings
+        rankings = get_sector_rankings()
+        top_sectors = [etf for etf, _, rank in rankings if rank <= Config.SECTOR_TOP_N]
+    except Exception:
+        pass
+
+    # Open pairs count
+    open_pairs_count = 0
+    try:
+        from trading.pairs_manager import get_open_pairs
+        open_pairs_count = len(get_open_pairs())
+    except Exception:
+        pass
+
+    # Open shorts count
+    open_shorts = 0
+    try:
+        open_shorts = sum(1 for t in p.trades if t.side == "SHORT" and t.status == "OPEN")
+    except Exception:
+        pass
+
+    kelly_active = closed_count >= Config.KELLY_MIN_TRADES
+
+    return {
+        "tiers": [
+            {
+                "tier": 1,
+                "label": "Core Filters & Risk",
+                "features": [
+                    {
+                        "name": "VIX Filter",
+                        "description": "Blocks all new long entries when market fear is elevated",
+                        "enabled": True,
+                        "status": "blocking" if (vix_val and vix_val > Config.VIX_THRESHOLD) else "active",
+                        "live": f"VIX {vix_val}" if vix_val else None,
+                        "config": f"threshold > {Config.VIX_THRESHOLD}",
+                    },
+                    {
+                        "name": "News Sentiment Filter",
+                        "description": "Scores Alpaca news headlines before allowing a buy",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": f"min score {Config.MIN_SENTIMENT_SCORE}",
+                    },
+                    {
+                        "name": "News Opportunity Scanner",
+                        "description": "Discovers buy candidates outside watchlist from breaking news",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": "24h window · min score 2 · top 10",
+                    },
+                    {
+                        "name": "IPO Tracker",
+                        "description": "Detects new listings, quarantines them, then signals momentum entries",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": f"{Config.IPO_MIN_DAYS}d quarantine · {int(Config.IPO_POSITION_SCALE*100)}% size · {int(Config.IPO_STOP_LOSS_PCT*100)}% SL",
+                    },
+                    {
+                        "name": "IPO Human Approval",
+                        "description": "60-minute window to accept/decline IPO trades before auto-execution",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": "60 min window · auto-executes on timeout",
+                    },
+                    {
+                        "name": "Trailing Stops",
+                        "description": "Locks in profits by closing when price falls from its peak",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": f"{int(Config.TRAILING_STOP_PCT*100)}% trail from peak",
+                    },
+                    {
+                        "name": "Earnings Blackout",
+                        "description": "Blocks new entries near earnings dates to avoid gap risk",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": f"no entry within {Config.EARNINGS_BLACKOUT_DAYS}d of earnings",
+                    },
+                    {
+                        "name": "Correlation Limit",
+                        "description": "Prevents loading up on highly correlated positions",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": f"max r = {Config.MAX_POSITION_CORRELATION}",
+                    },
+                    {
+                        "name": "Multi-Source Sentiment",
+                        "description": "Options flow + analyst ratings + insider buying + retail contrarian",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": f"4 sources · min composite {Config.MIN_COMPOSITE_SENTIMENT}",
+                    },
+                    {
+                        "name": "Sector Rotation",
+                        "description": "Only buys in the top N sectors by 3-month momentum",
+                        "enabled": True,
+                        "status": "active",
+                        "live": ", ".join(top_sectors) if top_sectors else None,
+                        "config": f"top {Config.SECTOR_TOP_N} of 11 SPDR sectors",
+                    },
+                    {
+                        "name": "Kelly Criterion Sizing",
+                        "description": "Optimal position sizing based on historical win rate and R-ratio",
+                        "enabled": True,
+                        "status": "active" if kelly_active else "warmup",
+                        "live": f"{closed_count}/{Config.KELLY_MIN_TRADES} trades" if not kelly_active else f"active ({closed_count} trades)",
+                        "config": f"half-Kelly · min {Config.KELLY_MIN_TRADES} trades · floor {int(Config.KELLY_MIN_FRACTION*100)}%",
+                    },
+                    {
+                        "name": "Pairs Trading",
+                        "description": "Dollar-neutral stat-arb on 13 cointegrated pairs (MSFT/GOOGL, XOM/CVX…)",
+                        "enabled": True,
+                        "status": "active",
+                        "live": f"{open_pairs_count} open pair{'s' if open_pairs_count != 1 else ''}",
+                        "config": f"z-entry {Config.PAIRS_ENTRY_ZSCORE} · z-exit {Config.PAIRS_EXIT_ZSCORE} · {Config.PAIRS_MAX_POSITIONS} max",
+                    },
+                ],
+            },
+            {
+                "tier": 2,
+                "label": "Advanced Intelligence",
+                "features": [
+                    {
+                        "name": "Short Selling",
+                        "description": "Shorts SELL signals confirmed by weekly chart + bottom sector + negative sentiment",
+                        "enabled": Config.SHORT_SELLING_ENABLED,
+                        "status": "active" if Config.SHORT_SELLING_ENABLED else "disabled",
+                        "live": f"{open_shorts} open short{'s' if open_shorts != 1 else ''}" if Config.SHORT_SELLING_ENABLED else None,
+                        "config": f"max {Config.SHORT_MAX_POSITIONS} shorts · bottom {Config.SHORT_SECTOR_BOTTOM_N} sectors",
+                    },
+                    {
+                        "name": "SEC 13F Tracker",
+                        "description": "Monitors quarterly filings from 8 top hedge funds via EDGAR",
+                        "enabled": Config.THIRTEEN_F_ENABLED,
+                        "status": "active" if Config.THIRTEEN_F_ENABLED else "disabled",
+                        "live": "Berkshire · Renaissance · Citadel · Two Sigma + 4 more",
+                        "config": f"boost ×{Config.THIRTEEN_F_BOOST_SCALE} · 7d cache",
+                    },
+                    {
+                        "name": "Multi-Timeframe Confirmation",
+                        "description": "Daily BUY must be confirmed by weekly chart (10w EMA + RSI + MACD)",
+                        "enabled": Config.WEEKLY_CONFIRM_REQUIRED,
+                        "status": "active" if Config.WEEKLY_CONFIRM_REQUIRED else "disabled",
+                        "live": None,
+                        "config": "10w EMA · RSI 35–75 · MACD positive",
+                    },
+                ],
+            },
+            {
+                "tier": 3,
+                "label": "Predictive Intelligence",
+                "features": [
+                    {
+                        "name": "Volatility Regime",
+                        "description": "Adapts position sizing and strategy bias to market conditions",
+                        "enabled": Config.REGIME_FILTER_ENABLED,
+                        "status": "active" if Config.REGIME_FILTER_ENABLED else "disabled",
+                        "live": regime_val,
+                        "config": "BULL 1× · RANGING 0.6× · HIGH_VOL block · BEAR 0.5×",
+                    },
+                    {
+                        "name": "ML Signal Booster",
+                        "description": "RandomForest classifier predicts 5-day profitability per symbol",
+                        "enabled": Config.ML_SIGNAL_ENABLED,
+                        "status": "active" if Config.ML_SIGNAL_ENABLED else "disabled",
+                        "live": None,
+                        "config": f"min p={Config.ML_MIN_PROBABILITY} · 150 sample warmup · 24h model cache",
+                    },
+                    {
+                        "name": "Dynamic Universe",
+                        "description": "Daily screens 140 extended large/mid-caps for momentum breakouts",
+                        "enabled": Config.DYNAMIC_UNIVERSE_ENABLED,
+                        "status": "active" if Config.DYNAMIC_UNIVERSE_ENABLED else "disabled",
+                        "live": f"top {Config.DYNAMIC_UNIVERSE_TOP_N} added to scan" if Config.DYNAMIC_UNIVERSE_ENABLED else None,
+                        "config": "above 50-EMA · RSI 40–65 · 4w breakout · volume surge",
+                    },
+                    {
+                        "name": "Risk Analytics",
+                        "description": "Daily Sharpe, Sortino, Calmar, max drawdown, VaR tracking",
+                        "enabled": True,
+                        "status": "active",
+                        "live": None,
+                        "config": "recorded at market close · 90d equity curve",
+                    },
+                ],
+            },
+        ]
+    }
+
+
 @app.get("/api/logs")
 def get_logs(_: str = Depends(verify), lines: int = 100) -> dict[str, Any]:
     from datetime import datetime

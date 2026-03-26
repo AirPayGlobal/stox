@@ -62,3 +62,7 @@ export async function fetchAnalytics() {
 export async function fetchRegime() {
   return client.get('/api/regime')
 }
+
+export async function fetchFeatures() {
+  return client.get('/api/features')
+}
