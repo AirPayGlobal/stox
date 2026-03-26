@@ -97,10 +97,11 @@ class Portfolio:
         stop_loss: float,
         take_profit: float,
         order_id: str = "",
+        side: str = "BUY",
     ) -> Trade:
         trade = Trade(
             symbol=symbol,
-            side="BUY",
+            side=side,
             shares=shares,
             entry_price=entry_price,
             stop_loss=stop_loss,
@@ -109,7 +110,7 @@ class Portfolio:
         )
         self.trades.append(trade)
         self.save()
-        logger.info(f"Opened trade: {symbol} x{shares} @ {entry_price:.2f}")
+        logger.info(f"Opened {side} trade: {symbol} x{shares} @ {entry_price:.2f}")
         return trade
 
     def get_open_trade(self, symbol: str) -> Optional[Trade]:

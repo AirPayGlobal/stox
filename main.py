@@ -473,12 +473,8 @@ class TradingBot:
                         stop_loss=stop_loss,
                         take_profit=take_profit,
                         order_id=order_id,
+                        side="SHORT",
                     )
-                    # Mark as SHORT in portfolio
-                    trade = self.portfolio.get_open_trade(symbol)
-                    if trade:
-                        trade.side = "SHORT"
-                        self.portfolio.save()
                     self.risk.record_trade()
                     existing_shorts += 1
             else:
@@ -794,7 +790,7 @@ class TradingBot:
                     # ---- Long position exit logic ----
                     if trade:
                         # Initialise high_water_mark on first check
-                        hwm = trade.high_water_mark or trade.entry_price
+                        hwm = trade.high_water_mark if trade.high_water_mark > 0 else trade.entry_price
                         if current_price > hwm:
                             trade.high_water_mark = current_price
                             self.portfolio.save()

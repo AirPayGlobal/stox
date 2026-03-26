@@ -93,6 +93,8 @@ def place_bracket_order(
 ) -> Optional[str]:
     """
     Submit a market BUY order with attached stop-loss and take-profit legs.
+    Uses GTC (Good Till Cancelled) so bracket legs persist overnight —
+    DAY orders would leave positions unprotected after market close.
     Returns the order ID on success, None on failure.
     """
     try:
@@ -100,7 +102,7 @@ def place_bracket_order(
             symbol=symbol,
             qty=qty,
             side=OrderSide.BUY,
-            time_in_force=TimeInForce.DAY,
+            time_in_force=TimeInForce.GTC,
             order_class="bracket",
             stop_loss=StopLossRequest(stop_price=round(stop_loss_price, 2)),
             take_profit=TakeProfitRequest(limit_price=round(take_profit_price, 2)),
