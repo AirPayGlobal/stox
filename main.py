@@ -32,8 +32,9 @@ from trading.alpaca_client import (
 from trading.risk_manager import RiskManager
 from trading.portfolio import Portfolio
 from strategy.ema_rsi_macd import EmaRsiMacdStrategy
-from analysis.market_filter import is_vix_too_high, is_sentiment_negative
-from analysis.news_scanner import find_news_catalysts, apply_news_boost
+from analysis.market_filter import is_vix_too_high
+from analysis.news_scanner import find_news_catalysts
+from analysis.sentiment_engine import is_sentiment_blocked, apply_sentiment_boost, get_composite_sentiment
 from analysis.earnings_calendar import is_earnings_blackout, warn_open_positions_near_earnings
 from analysis.ipo_tracker import (
     register_new_ipos,
@@ -213,9 +214,9 @@ class TradingBot:
             if sig == Signal.BUY and sym not in open_symbols
         ]
 
-        # Re-rank by boosting technical scores with news sentiment
+        # Re-rank using 4-source composite sentiment (options+analyst+insider+retail)
         if buy_candidates:
-            buy_candidates = apply_news_boost(buy_candidates)
+            buy_candidates = apply_sentiment_boost(buy_candidates)
 
         logger.info(f"Buy candidates: {len(buy_candidates)}")
 
@@ -226,8 +227,8 @@ class TradingBot:
             if self.risk.max_positions_reached(len(get_positions())):
                 break
 
-            # News sentiment filter — skip symbols with recent negative headlines
-            if is_sentiment_negative(symbol):
+            # 4-source composite sentiment filter (options + analyst + insider + retail)
+            if is_sentiment_blocked(symbol):
                 continue
 
             # Earnings blackout — skip if reporting in ≤ EARNINGS_BLACKOUT_DAYS
@@ -307,7 +308,7 @@ class TradingBot:
                 break
             if symbol in open_symbols:
                 continue
-            if is_sentiment_negative(symbol):
+            if is_sentiment_blocked(symbol):
                 continue
 
             try:

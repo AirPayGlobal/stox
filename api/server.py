@@ -119,6 +119,16 @@ def bot_stop(_: str = Depends(verify)) -> dict[str, Any]:
     return bot_manager.stop()
 
 
+@app.get("/api/sentiment/{symbol}")
+def sentiment(symbol: str, _: str = Depends(verify)) -> dict[str, Any]:
+    """Return the 4-source composite sentiment breakdown for a symbol."""
+    try:
+        from analysis.sentiment_engine import get_composite_sentiment
+        return get_composite_sentiment(symbol.upper())
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @app.get("/api/pending-trades")
 def pending_trades(_: str = Depends(verify)) -> dict[str, Any]:
     """List IPO trades awaiting human approval."""
