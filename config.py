@@ -80,7 +80,7 @@ class Config:
     MAX_POSITION_CORRELATION: float = float(os.getenv("MAX_POSITION_CORRELATION", "0.7"))  # skip if r > this with any open position
 
     # Market filters
-    VIX_THRESHOLD: float = float(os.getenv("VIX_THRESHOLD", "25"))   # skip buys when VIX > this
+    VIX_THRESHOLD: float = float(os.getenv("VIX_THRESHOLD", "30"))   # skip buys when VIX > this (regime handles 25-30 via sizing)
     MIN_SENTIMENT_SCORE: float = float(os.getenv("MIN_SENTIMENT_SCORE", "-0.2"))  # legacy news-only filter
     MIN_COMPOSITE_SENTIMENT: float = float(os.getenv("MIN_COMPOSITE_SENTIMENT", "-3.0"))  # composite 4-source filter
 
