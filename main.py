@@ -33,6 +33,7 @@ from trading.risk_manager import RiskManager
 from trading.portfolio import Portfolio
 from strategy.ema_rsi_macd import EmaRsiMacdStrategy
 from analysis.market_filter import is_vix_too_high, is_sentiment_negative
+from analysis.news_scanner import find_news_catalysts, apply_news_boost
 from utils.logger import get_logger
 
 logger = get_logger("main")
@@ -119,9 +120,30 @@ class TradingBot:
             logger.info("Max positions reached — not opening new trades.")
             return
 
-        # Fetch latest data for watchlist
-        logger.info(f"Scanning {len(Config.WATCHLIST)} symbols...")
-        data = fetch_batch(Config.WATCHLIST, lookback_days=100)
+        # --- News catalyst discovery (symbols not necessarily in watchlist) ---
+        news_symbols = []
+        try:
+            catalysts = find_news_catalysts(hours=24, min_score=2, max_results=10)
+            news_symbols = [
+                sym for sym, score, headline in catalysts
+                if sym not in open_symbols and sym not in Config.WATCHLIST
+            ]
+            if news_symbols:
+                logger.info(
+                    f"News scanner discovered {len(news_symbols)} new symbols: "
+                    + ", ".join(
+                        f"{sym}(score={sc:.1f})"
+                        for sym, sc, _ in catalysts
+                        if sym in news_symbols
+                    )
+                )
+        except Exception as exc:
+            logger.warning(f"News catalyst scan failed: {exc}")
+
+        # Fetch latest data for watchlist + any news-discovered symbols
+        scan_symbols = Config.WATCHLIST + news_symbols
+        logger.info(f"Scanning {len(scan_symbols)} symbols ({len(news_symbols)} from news)...")
+        data = fetch_batch(scan_symbols, lookback_days=100)
 
         # Screen for signals
         candidates = screen_universe(data)
@@ -130,6 +152,10 @@ class TradingBot:
             for sym, sig, score in candidates
             if sig == Signal.BUY and sym not in open_symbols
         ]
+
+        # Re-rank by boosting technical scores with news sentiment
+        if buy_candidates:
+            buy_candidates = apply_news_boost(buy_candidates)
 
         logger.info(f"Buy candidates: {len(buy_candidates)}")
 
