@@ -309,6 +309,16 @@ def market_data(_: str = Depends(verify)) -> dict[str, Any]:
     return result
 
 
+@app.get("/api/review")
+def performance_review(days: int = 30, _: str = Depends(verify)) -> dict[str, Any]:
+    """Run a performance review and return JSON for report generation."""
+    from analysis.review import run_review
+    try:
+        return run_review(days=days)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @app.get("/api/analytics")
 def analytics(_: str = Depends(verify)) -> dict[str, Any]:
     """Portfolio risk metrics: Sharpe, Sortino, drawdown, VaR, equity curve."""

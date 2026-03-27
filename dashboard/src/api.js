@@ -70,3 +70,7 @@ export async function fetchFeatures() {
 export async function fetchMarket() {
   return client.get('/api/market')
 }
+
+export async function fetchReview(days = 30) {
+  return client.get(`/api/review?days=${days}`)
+}
