@@ -977,7 +977,7 @@ function FeaturesPanel() {
 function LogViewer() {
   const [logs, setLogs] = useState([])
   const [open, setOpen] = useState(true)
-  const bottomRef = useRef(null)
+  const bodyRef = useRef(null)
 
   useEffect(() => {
     const load = () => fetchLogs(150).then(r => setLogs(r.data.lines)).catch(() => {})
@@ -987,8 +987,10 @@ function LogViewer() {
   }, [])
 
   useEffect(() => {
-    if (open) bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [logs, open])
+    if (open && bodyRef.current) {
+      bodyRef.current.scrollTop = bodyRef.current.scrollHeight
+    }
+  }, [logs])
 
   return (
     <div className="log-viewer">
@@ -997,7 +999,7 @@ function LogViewer() {
         <span className="log-toggle">{open ? '▲' : '▼'}</span>
       </div>
       {open && (
-        <div className="log-body">
+        <div className="log-body" ref={bodyRef}>
           {logs.length === 0
             ? <span className="log-empty">No logs yet.</span>
             : logs.map((line, i) => {
@@ -1008,7 +1010,6 @@ function LogViewer() {
                 return <div key={i} className={`log-line ${level}`}>{line}</div>
               })
           }
-          <div ref={bottomRef} />
         </div>
       )}
     </div>
