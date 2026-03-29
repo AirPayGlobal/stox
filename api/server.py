@@ -68,6 +68,16 @@ def health() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/market-status")
+def market_status(_: str = Depends(verify)) -> dict[str, Any]:
+    """Return whether the US market is currently open."""
+    try:
+        from trading.alpaca_client import is_market_open
+        return {"is_open": is_market_open()}
+    except Exception:
+        return {"is_open": None}
+
+
 @app.get("/api/account")
 def account(_: str = Depends(verify)) -> dict[str, Any]:
     try:

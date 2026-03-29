@@ -211,3 +211,52 @@ def is_market_open() -> bool:
     """Check if the US stock market is currently open."""
     clock = get_trading_client().get_clock()
     return clock.is_open
+
+
+def get_filled_exit_price(symbol: str, after_iso: str) -> tuple[Optional[float], str]:
+    """
+    Scan recent closed orders to find the fill price of a bracket exit
+    (take-profit limit-sell or stop-loss stop-sell) for a long position.
+
+    Returns (fill_price, status) where status is one of:
+        'TOOK_PROFIT'  — limit sell filled (price reached TP)
+        'STOPPED'      — stop sell filled  (price hit SL)
+        'CLOSED'       — filled sell of unknown type
+    Returns (None, '') if no filled sell order is found.
+    """
+    try:
+        from alpaca.trading.requests import GetOrdersRequest
+        from datetime import datetime as _dt
+
+        try:
+            after_dt = _dt.fromisoformat(after_iso)
+        except Exception:
+            after_dt = None
+
+        orders = get_trading_client().get_orders(
+            filter=GetOrdersRequest(
+                status="closed",
+                symbols=[symbol],
+                limit=20,
+                after=after_dt,
+            )
+        )
+        for order in sorted(orders, key=lambda o: str(o.filled_at or ""), reverse=True):
+            if str(order.status).lower() != "filled":
+                continue
+            if "sell" not in str(order.side).lower():
+                continue
+            price = float(order.filled_avg_price or 0)
+            if price <= 0:
+                continue
+            otype = str(
+                getattr(order, "order_type", None) or getattr(order, "type", "")
+            ).lower()
+            if "limit" in otype:
+                return price, "TOOK_PROFIT"
+            if "stop" in otype:
+                return price, "STOPPED"
+            return price, "CLOSED"
+    except Exception as exc:
+        logger.debug(f"get_filled_exit_price({symbol}): {exc}")
+    return None, ""

@@ -76,6 +76,31 @@ function RegimeBadge() {
 
 // ------------------------------------------------------------------ Header
 
+function MarketStatusBadge() {
+  const [isOpen, setIsOpen] = useState(null)
+
+  useEffect(() => {
+    const check = () =>
+      fetch('/api/market-status')
+        .then(r => r.json())
+        .then(d => setIsOpen(d.is_open))
+        .catch(() => setIsOpen(null))
+    check()
+    const id = setInterval(check, 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  if (isOpen === null) return null
+  return (
+    <span
+      className={`badge market-status-badge ${isOpen ? 'market-open' : 'market-closed'}`}
+      title={isOpen ? 'US market is open — prices are live' : 'US market is closed — P&L reflects last close price (Alpaca may show extended-hours ticks)'}
+    >
+      {isOpen ? 'MKT OPEN' : 'MKT CLOSED'}
+    </span>
+  )
+}
+
 function Header({ account, botStatus, onToggle, toggleLoading, onLogout, onRefresh }) {
   const running = botStatus?.running
   const mode = (botStatus?.mode || 'paper').toUpperCase()
@@ -90,6 +115,7 @@ function Header({ account, botStatus, onToggle, toggleLoading, onLogout, onRefre
           {mode}
         </span>
         {isDry && <span className="badge badge-dry">DRY RUN</span>}
+        <MarketStatusBadge />
         <RegimeBadge />
       </div>
 

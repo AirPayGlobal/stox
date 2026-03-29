@@ -545,6 +545,19 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
   font-family: var(--mono);
 }
 
+/* ------------------------------------------------------------------ Market status badge */
+
+.market-status-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 7px;
+  border-radius: 4px;
+  cursor: default;
+}
+.market-open   { background: rgba(63,185,80,0.15);   color: #3fb950; border: 1px solid rgba(63,185,80,0.3); }
+.market-closed { background: rgba(139,148,158,0.12); color: #8b949e; border: 1px solid rgba(139,148,158,0.25); }
+
 /* ------------------------------------------------------------------ Regime badges */
 
 .regime-badge {

@@ -156,6 +156,15 @@ class TradingBot:
             logger.error(f"Could not fetch account info: {exc}")
             return
 
+        # --- EXIT MANAGEMENT runs every scan regardless of entry filters ---
+        # Fetching positions here so exits always have fresh data.
+        open_positions = get_positions()
+        pending_symbols = get_pending_symbols()
+        open_symbols = set(open_positions.keys()) | pending_symbols
+        self._check_exits(open_positions, equity)
+
+        # --- ENTRY FILTERS — early-returns here do NOT skip exits (done above) ---
+
         # Daily loss circuit-breaker
         if self.risk.daily_loss_exceeded(equity):
             logger.warning("Daily loss limit hit — no new trades today.")
@@ -174,14 +183,7 @@ class TradingBot:
             logger.warning(f"Regime {regime.value} — no new long entries this scan.")
             return
 
-        open_positions = get_positions()
-        pending_symbols = get_pending_symbols()
-        open_symbols = set(open_positions.keys()) | pending_symbols
-
-        # Check exits first
-        self._check_exits(open_positions, equity)
-
-        # Refresh open positions count after exits
+        # Refresh positions after exits before evaluating capacity
         open_positions = get_positions()
 
         if self.risk.max_positions_reached(len(open_positions)):
@@ -823,6 +825,53 @@ class TradingBot:
 
             except Exception as exc:
                 logger.error(f"Exit check error for {symbol}: {exc}")
+
+        # --- Reconcile bracket-fired exits ---
+        # When Alpaca's bracket TP or SL fills, the position disappears from
+        # get_positions() but our local portfolio still shows it as OPEN.
+        # Detect these and close them in the local record.
+        self._reconcile_broker_exits(open_positions)
+
+    def _reconcile_broker_exits(self, open_positions: dict) -> None:
+        """
+        Close any trade that is OPEN in our portfolio but no longer present
+        in Alpaca's positions — meaning the broker's bracket TP or SL fired.
+        Queries Alpaca's order history for the exact fill price; falls back to
+        TP/SL proximity heuristic if the order lookup fails.
+        """
+        from trading.alpaca_client import get_filled_exit_price
+        from data.fetcher import fetch_latest_price
+
+        orphaned = [
+            t for t in self.portfolio.trades
+            if t.status == "OPEN" and t.symbol not in open_positions
+        ]
+
+        for trade in orphaned:
+            symbol = trade.symbol
+            try:
+                fill_price, fill_status = get_filled_exit_price(symbol, trade.opened_at)
+
+                if not fill_price:
+                    # Fallback: current price vs stored TP/SL levels
+                    cur = fetch_latest_price(symbol) or 0.0
+                    tp, sl = trade.take_profit, trade.stop_loss
+                    if tp > 0 and cur >= tp * 0.95:
+                        fill_price, fill_status = tp, "TOOK_PROFIT"
+                    elif sl > 0 and cur <= sl * 1.05:
+                        fill_price, fill_status = sl, "STOPPED"
+                    else:
+                        fill_price = cur or trade.entry_price
+                        fill_status = "CLOSED"
+
+                logger.info(
+                    f"Reconciled broker exit: {symbol} @ ${fill_price:.2f} "
+                    f"[{fill_status}] (bracket fired while bot was in filter guard)"
+                )
+                self.portfolio.close_trade(symbol, fill_price, status=fill_status)
+
+            except Exception as exc:
+                logger.error(f"Reconcile error for {symbol}: {exc}")
 
     def eod_summary(self) -> None:
         """End-of-day summary with risk analytics."""
