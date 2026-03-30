@@ -148,8 +148,8 @@ def main() -> int:
           f"Profit factor: {all_time.get('profit_factor', 0):.2f}x")
 
     # Need at least 10 trades for meaningful optimization
-    if all_time.get("count", 0) < 20:
-        print(f"\n  Only {all_time.get('count', 0)} trades — need 20+ for optimization. Skipping.")
+    if all_time.get("count", 0) < 10:
+        print(f"\n  Only {all_time.get('count', 0)} trades — need 10+ for optimization. Skipping.")
         return 0
 
     # Step 2: Baseline backtest
