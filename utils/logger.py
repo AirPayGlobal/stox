@@ -3,7 +3,7 @@ Centralised logging configuration.
 """
 import logging
 import os
-from datetime import datetime
+from logging.handlers import TimedRotatingFileHandler
 
 _LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
 os.makedirs(_LOG_DIR, exist_ok=True)
@@ -29,9 +29,17 @@ def get_logger(name: str) -> logging.Logger:
     ch.setFormatter(fmt)
     logger.addHandler(ch)
 
-    # File handler (rotates daily by filename)
-    log_file = os.path.join(_LOG_DIR, f"{datetime.now():%Y-%m-%d}.log")
-    fh = logging.FileHandler(log_file)
+    # Rotating file handler — always writes to logs/stox.log, rotates at
+    # midnight UTC and keeps 30 days of backups.  Using a fixed filename means
+    # the API can always read the current log regardless of when the bot started.
+    log_file = os.path.join(_LOG_DIR, "stox.log")
+    fh = TimedRotatingFileHandler(
+        log_file,
+        when="midnight",
+        interval=1,
+        backupCount=30,
+        utc=True,
+    )
     fh.setFormatter(fmt)
     logger.addHandler(fh)
 

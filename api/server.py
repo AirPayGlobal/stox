@@ -576,10 +576,8 @@ def features(_: str = Depends(verify)) -> dict[str, Any]:
 
 @app.get("/api/logs")
 def get_logs(_: str = Depends(verify), lines: int = 100) -> dict[str, Any]:
-    from datetime import datetime
     from pathlib import Path
-    log_dir = Path(__file__).parent.parent / "logs"
-    log_file = log_dir / f"{datetime.now():%Y-%m-%d}.log"
+    log_file = Path(__file__).parent.parent / "logs" / "stox.log"
     if not log_file.exists():
         return {"lines": []}
     with open(log_file) as f:
