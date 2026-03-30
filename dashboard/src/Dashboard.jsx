@@ -195,8 +195,8 @@ function StatsRow({ account, summary, posCount }) {
       />
       <StatCard
         label="Open Positions"
-        value={`${posCount} / 10`}
-        sub={`Max ${10} concurrent`}
+        value={`${posCount} / 20`}
+        sub="Max 20 concurrent"
       />
     </div>
   )
