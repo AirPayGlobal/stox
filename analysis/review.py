@@ -104,11 +104,11 @@ def generate_recommendations(stats: dict, snapshots: list[dict]) -> list[dict]:
     recent = stats["recent"]
 
     # Need at least 10 trades for meaningful recommendations
-    if all_time["count"] < 10:
+    if all_time["count"] < 20:
         recs.append({
             "parameter": "N/A",
             "action": "wait",
-            "reason": f"Only {all_time['count']} closed trades — need 10+ for reliable analysis",
+            "reason": f"Only {all_time['count']} closed trades — need 20+ for reliable analysis",
             "priority": "low",
         })
         return recs
