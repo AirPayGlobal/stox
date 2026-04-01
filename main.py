@@ -187,7 +187,7 @@ class TradingBot:
         open_positions = get_positions()
 
         if self.risk.max_positions_reached(len(open_positions)):
-            logger.info("Max positions reached — not opening new trades.")
+            logger.info(f"Max positions reached ({len(open_positions)}/{Config.MAX_OPEN_POSITIONS}) — not opening new trades.")
             return
 
         # --- Auto-execute expired IPO approvals (user didn't respond in 60 min) ---
