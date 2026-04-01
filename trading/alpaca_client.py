@@ -217,6 +217,8 @@ def get_portfolio_history(period: str = "1M", timeframe: str = "1D") -> list[dic
     """
     Return daily equity snapshots from Alpaca's portfolio history API.
     Each entry: {"timestamp": ISO str, "equity": float}
+    None equity values are forward-filled from the last known value so new
+    accounts (where most historical slots are null) still produce a full curve.
     Falls back to [] on error.
     """
     try:
@@ -225,13 +227,19 @@ def get_portfolio_history(period: str = "1M", timeframe: str = "1D") -> list[dic
 
         req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe, extended_hours=False)
         history = get_trading_client().get_portfolio_history(filter=req)
-        result = []
+
+        # Forward-fill: carry the last known equity value into null slots
+        last_known = None
+        filled = []
         for ts, eq in zip(history.timestamp, history.equity):
-            if eq is None:
-                continue
+            if eq is not None:
+                last_known = float(eq)
+            if last_known is None:
+                continue  # no value yet at all — skip leading nulls
             dt = _dt.utcfromtimestamp(ts)
-            result.append({"timestamp": dt.strftime("%Y-%m-%dT%H:%M:%S"), "equity": round(float(eq), 2)})
-        return result
+            filled.append({"timestamp": dt.strftime("%Y-%m-%dT%H:%M:%S"), "equity": round(last_known, 2)})
+
+        return filled
     except Exception as exc:
         logger.warning(f"get_portfolio_history failed: {exc}")
         return []
