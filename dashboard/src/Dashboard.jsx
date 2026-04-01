@@ -205,7 +205,19 @@ function StatsRow({ account, summary, posCount }) {
 // ------------------------------------------------------------------ Equity chart
 
 function EquityChart({ snapshots, account }) {
-  if (!snapshots || snapshots.length < 2) {
+  const liveEquity = account?.equity
+
+  // Build full data set first so the live "Now" point counts toward the minimum
+  const baseData = (snapshots || []).map((s) => ({
+    date: fmtDate(s.timestamp),
+    equity: parseFloat(s.equity.toFixed(2)),
+    isLive: false,
+  }))
+  const data = liveEquity != null
+    ? [...baseData, { date: 'Now', equity: parseFloat(Number(liveEquity).toFixed(2)), isLive: true }]
+    : baseData
+
+  if (data.length < 2) {
     return (
       <div className="card chart-card">
         <h2>Equity Curve</h2>
@@ -216,17 +228,6 @@ function EquityChart({ snapshots, account }) {
       </div>
     )
   }
-
-  // Append current live equity as a "Now" point so the chart is always up-to-date
-  const liveEquity = account?.equity
-  const baseData = snapshots.map((s) => ({
-    date: fmtDate(s.timestamp),
-    equity: parseFloat(s.equity.toFixed(2)),
-    isLive: false,
-  }))
-  const data = liveEquity != null
-    ? [...baseData, { date: 'Now', equity: parseFloat(Number(liveEquity).toFixed(2)), isLive: true }]
-    : baseData
 
   const minVal = Math.min(...data.map((d) => d.equity))
   const maxVal = Math.max(...data.map((d) => d.equity))
