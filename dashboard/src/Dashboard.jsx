@@ -204,7 +204,7 @@ function StatsRow({ account, summary, posCount }) {
 
 // ------------------------------------------------------------------ Equity chart
 
-function EquityChart({ snapshots }) {
+function EquityChart({ snapshots, account }) {
   if (!snapshots || snapshots.length < 2) {
     return (
       <div className="card chart-card">
@@ -217,10 +217,16 @@ function EquityChart({ snapshots }) {
     )
   }
 
-  const data = snapshots.map((s) => ({
+  // Append current live equity as a "Now" point so the chart is always up-to-date
+  const liveEquity = account?.equity
+  const baseData = snapshots.map((s) => ({
     date: fmtDate(s.timestamp),
     equity: parseFloat(s.equity.toFixed(2)),
+    isLive: false,
   }))
+  const data = liveEquity != null
+    ? [...baseData, { date: 'Now', equity: parseFloat(Number(liveEquity).toFixed(2)), isLive: true }]
+    : baseData
 
   const minVal = Math.min(...data.map((d) => d.equity))
   const maxVal = Math.max(...data.map((d) => d.equity))
@@ -257,7 +263,20 @@ function EquityChart({ snapshots }) {
             stroke="#58a6ff"
             fill="url(#eqGrad)"
             strokeWidth={2}
-            dot={false}
+            dot={(props) => {
+              if (!props.payload?.isLive) return null
+              return (
+                <circle
+                  key="live-dot"
+                  cx={props.cx}
+                  cy={props.cy}
+                  r={5}
+                  fill="#3fb950"
+                  stroke="#0d1117"
+                  strokeWidth={2}
+                />
+              )
+            }}
             activeDot={{ r: 4 }}
           />
         </AreaChart>
@@ -1534,7 +1553,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
             <PairsPanel />
             <FeaturesPanel />
             <AnalyticsPanel />
-            <EquityChart snapshots={equityCurve} />
+            <EquityChart snapshots={equityCurve} account={account} />
             <div className="tables-grid">
               <PositionsTable positions={positions} />
               <TradesTable trades={trades.slice(0, 20)} />
