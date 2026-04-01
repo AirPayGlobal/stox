@@ -217,7 +217,7 @@ function EquityChart({ snapshots, account }) {
     ? [...baseData, { date: 'Now', equity: parseFloat(Number(liveEquity).toFixed(2)), isLive: true }]
     : baseData
 
-  if (data.length < 2) {
+  if (data.length === 0) {
     return (
       <div className="card chart-card">
         <h2>Equity Curve</h2>
