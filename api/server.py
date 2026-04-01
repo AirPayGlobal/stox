@@ -7,6 +7,13 @@ compiled React SPA from dashboard/dist/.
 """
 from __future__ import annotations
 
+# ------------------------------------------------------------------ Fast boot
+# Only stdlib + fastapi are imported here so the app object and the /health
+# endpoint are available immediately when Uvicorn starts.  All heavy project
+# imports (trading clients, config, ML modules, etc.) are deferred to the
+# individual route handlers that actually need them.
+
+import base64
 import os
 import secrets
 from dataclasses import asdict
@@ -17,16 +24,32 @@ from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from api.bot_manager import bot_manager
-from config import Config
-from trading.alpaca_client import get_account, get_positions, place_bracket_order, get_portfolio_history
-from trading.portfolio import Portfolio
-from trading.approval_queue import get_pending, approve, decline, mark_executed
-from utils.logger import get_logger
-
-logger = get_logger(__name__)
-
 app = FastAPI(title="STOX Dashboard", docs_url=None, redoc_url=None)
+
+# ------------------------------------------------------------------ Health
+# Registered first — before any other initialisation — so Railway's
+# healthcheck gets a response even if later imports are slow.
+
+@app.get("/health")
+def health() -> dict:
+    """Railway health check — no auth required."""
+    return {"status": "ok"}
+
+
+# ------------------------------------------------------------------ Lazy helpers
+
+def _bot_manager():
+    from api.bot_manager import bot_manager as _bm
+    return _bm
+
+def _config():
+    from config import Config as _cfg
+    return _cfg
+
+def _logger():
+    from utils.logger import get_logger as _gl
+    return _gl(__name__)
+
 
 _DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
@@ -34,8 +57,6 @@ _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
 
 # ------------------------------------------------------------------ Auth
 # Uses Bearer token (base64 user:pass) to avoid browser intercepting 401s
-
-import base64
 
 def verify(request: Request) -> str:
     auth = request.headers.get("Authorization", "")
@@ -62,12 +83,6 @@ def verify(request: Request) -> str:
 
 # ------------------------------------------------------------------ API
 
-@app.get("/health")
-def health() -> dict:
-    """Railway health check — no auth required."""
-    return {"status": "ok"}
-
-
 @app.get("/api/market-status")
 def market_status(_: str = Depends(verify)) -> dict[str, Any]:
     """Return whether the US market is currently open."""
@@ -81,6 +96,7 @@ def market_status(_: str = Depends(verify)) -> dict[str, Any]:
 @app.get("/api/account")
 def account(_: str = Depends(verify)) -> dict[str, Any]:
     try:
+        from trading.alpaca_client import get_account
         return get_account()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
@@ -89,6 +105,7 @@ def account(_: str = Depends(verify)) -> dict[str, Any]:
 @app.get("/api/positions")
 def positions(_: str = Depends(verify)) -> dict[str, Any]:
     try:
+        from trading.alpaca_client import get_positions
         return get_positions()
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
@@ -96,17 +113,21 @@ def positions(_: str = Depends(verify)) -> dict[str, Any]:
 
 @app.get("/api/trades")
 def trades(_: str = Depends(verify)) -> dict[str, Any]:
+    from trading.portfolio import Portfolio
     p = Portfolio()
     return {"trades": [asdict(t) for t in reversed(p.trades)]}
 
 
 @app.get("/api/summary")
 def summary(_: str = Depends(verify)) -> dict[str, Any]:
+    from trading.portfolio import Portfolio
     return Portfolio().summary()
 
 
 @app.get("/api/equity-curve")
 def equity_curve(_: str = Depends(verify)) -> dict[str, Any]:
+    from trading.alpaca_client import get_portfolio_history
+    from trading.portfolio import Portfolio
     # Prefer Alpaca portfolio history (full trail from account creation)
     snapshots = get_portfolio_history(period="1M", timeframe="1D")
     if not snapshots:
@@ -118,20 +139,20 @@ def equity_curve(_: str = Depends(verify)) -> dict[str, Any]:
 
 @app.get("/api/bot/status")
 def bot_status(_: str = Depends(verify)) -> dict[str, Any]:
-    return bot_manager.get_status()
+    return _bot_manager().get_status()
 
 
 @app.post("/api/bot/start")
 def bot_start(dry_run: bool = False, _: str = Depends(verify)) -> dict[str, Any]:
     try:
-        return bot_manager.start(dry_run=dry_run)
+        return _bot_manager().start(dry_run=dry_run)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/api/bot/stop")
 def bot_stop(_: str = Depends(verify)) -> dict[str, Any]:
-    return bot_manager.stop()
+    return _bot_manager().stop()
 
 
 @app.get("/api/pairs")
@@ -154,12 +175,16 @@ def sentiment(symbol: str, _: str = Depends(verify)) -> dict[str, Any]:
 @app.get("/api/pending-trades")
 def pending_trades(_: str = Depends(verify)) -> dict[str, Any]:
     """List IPO trades awaiting human approval."""
+    from trading.approval_queue import get_pending
     return {"trades": get_pending()}
 
 
 @app.post("/api/pending-trades/{approval_id}/approve")
 def approve_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
     """Approve an IPO trade and place the bracket order immediately."""
+    from trading.alpaca_client import place_bracket_order
+    from trading.approval_queue import approve, mark_executed
+    from trading.portfolio import Portfolio
     entry = approve(approval_id)
     if not entry:
         raise HTTPException(status_code=404, detail="Approval not found or already decided")
@@ -188,6 +213,7 @@ def approve_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
 @app.post("/api/pending-trades/{approval_id}/decline")
 def decline_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
     """Decline an IPO trade."""
+    from trading.approval_queue import decline
     if not decline(approval_id):
         raise HTTPException(status_code=404, detail="Approval not found or already decided")
     return {"message": "Trade declined"}
@@ -233,7 +259,7 @@ def market_data(_: str = Depends(verify)) -> dict[str, Any]:
             except Exception:
                 continue
     except Exception as exc:
-        logger.debug(f"Index fetch failed: {exc}")
+        _logger().debug(f"Index fetch failed: {exc}")
 
     # --- Sector ETFs ---
     try:
@@ -259,7 +285,7 @@ def market_data(_: str = Depends(verify)) -> dict[str, Any]:
         sectors.sort(key=lambda x: x["change_pct"], reverse=True)
         result["sectors"] = sectors
     except Exception as exc:
-        logger.debug(f"Sector ETF fetch failed: {exc}")
+        _logger().debug(f"Sector ETF fetch failed: {exc}")
 
     # --- Regime ---
     try:
@@ -269,6 +295,8 @@ def market_data(_: str = Depends(verify)) -> dict[str, Any]:
 
     # --- Watchlist snapshot: open positions first, then top 10 watchlist ---
     try:
+        from trading.portfolio import Portfolio
+        from config import Config
         p = Portfolio()
         open_syms = [t.symbol for t in p.trades if t.status == "OPEN"]
         snap_syms = list(dict.fromkeys(open_syms + Config.WATCHLIST[:10]))
@@ -296,10 +324,12 @@ def market_data(_: str = Depends(verify)) -> dict[str, Any]:
         snap.sort(key=lambda x: (not x["is_open"], -abs(x["change_pct"])))
         result["watchlist_snapshot"] = snap
     except Exception as exc:
-        logger.debug(f"Watchlist snapshot failed: {exc}")
+        _logger().debug(f"Watchlist snapshot failed: {exc}")
 
     # --- Current filter state summary ---
     try:
+        from config import Config
+        from trading.portfolio import Portfolio
         vix_val = result["vix"]["price"] if result["vix"] else None
         reg = result["regime"].get("regime") if result["regime"] else None
         result["filter_state"] = {
@@ -338,6 +368,7 @@ def performance_review(days: int = 30, _: str = Depends(verify)) -> dict[str, An
 def analytics(_: str = Depends(verify)) -> dict[str, Any]:
     """Portfolio risk metrics: Sharpe, Sortino, drawdown, VaR, equity curve."""
     from analysis.risk_analytics import compute_analytics
+    from trading.portfolio import Portfolio
     p = Portfolio()
     return compute_analytics(portfolio=p)
 
@@ -355,6 +386,8 @@ def features(_: str = Depends(verify)) -> dict[str, Any]:
     Live status of every implemented feature across all tiers.
     Returns config values, enabled state, and live metrics where available.
     """
+    from config import Config
+    from trading.portfolio import Portfolio
     p = Portfolio()
     summary = p.summary()
     closed_count = summary.get("total_trades", 0)
@@ -605,7 +638,7 @@ if _DIST.exists():
         """Serve the React SPA for all non-API routes."""
         return FileResponse(str(_DIST / "index.html"))
 else:
-    logger.warning(
+    _logger().warning(
         "React build not found at dashboard/dist. "
         "Run `npm run build` inside the dashboard/ directory."
     )
