@@ -35,7 +35,19 @@ def _stub_ta():
         sys.modules[f"ta.{sub}"] = m
     sys.modules["ta"] = ta
 
+
+def _stub_yfinance():
+    """Stub yfinance so analysis.regime can be imported without the real package."""
+    if "yfinance" in sys.modules:
+        return
+    yf = types.ModuleType("yfinance")
+    yf.download = lambda *a, **kw: pd.DataFrame()
+    yf.Ticker   = MagicMock()
+    sys.modules["yfinance"] = yf
+
+
 _stub_ta()
+_stub_yfinance()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -484,11 +496,12 @@ class TestRunEodFactorCheck:
     def test_bear_regime_sets_target(self):
         positions = _positions_simple(["AAPL", "MSFT"])
 
+        import analysis.regime as _regime_mod
         from analysis.regime import Regime
 
         with PricePatcher():
             with patch("analysis.factor_monitor._write_factor_log"):
-                with patch("analysis.factor_monitor.detect_regime", return_value=Regime.BEAR):
+                with patch.object(_regime_mod, "detect_regime", return_value=Regime.BEAR):
                     result = run_eod_factor_check(positions, equity=20_000.0)
 
         assert result.get("regime_beta_target") == 0.5
@@ -496,9 +509,12 @@ class TestRunEodFactorCheck:
     def test_regime_check_failure_does_not_crash(self):
         """If regime module raises, EOD check should still return a dashboard."""
         positions = _positions_simple(["AAPL"])
+
+        import analysis.regime as _regime_mod
+
         with PricePatcher():
             with patch("analysis.factor_monitor._write_factor_log"):
-                with patch("analysis.factor_monitor.detect_regime", side_effect=RuntimeError("no regime")):
+                with patch.object(_regime_mod, "detect_regime", side_effect=RuntimeError("no regime")):
                     result = run_eod_factor_check(positions, equity=10_000.0)
         assert isinstance(result, dict)
         assert "beta" in result
