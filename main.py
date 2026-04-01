@@ -814,12 +814,21 @@ class TradingBot:
                                 logger.info(f"[DRY RUN] Would break-even close {symbol}")
                             continue
 
-                        trail_floor = hwm * (1 - Config.TRAILING_STOP_PCT)
+                        # Tiered trailing stop: give bigger winners more room to breathe
+                        gain_pct = (hwm / trade.entry_price) - 1
+                        if gain_pct >= Config.TRAILING_HIGH_TRIGGER:
+                            trail_pct = Config.TRAILING_STOP_HIGH_PCT   # +18%+: 7% trail
+                        elif gain_pct >= Config.TRAILING_MID_TRIGGER:
+                            trail_pct = Config.TRAILING_STOP_MID_PCT    # +8-18%: 5% trail
+                        else:
+                            trail_pct = Config.TRAILING_STOP_PCT        # <+8%: 4% trail
+
+                        trail_floor = hwm * (1 - trail_pct)
                         if current_price < trail_floor:
                             logger.info(
                                 f"Trailing stop: {symbol} price=${current_price:.2f} "
-                                f"peak=${hwm:.2f} floor=${trail_floor:.2f} "
-                                f"({Config.TRAILING_STOP_PCT:.0%} trail)"
+                                f"peak=${hwm:.2f} (+{gain_pct:.1%}) "
+                                f"floor=${trail_floor:.2f} ({trail_pct:.0%} trail)"
                             )
                             if not self.dry_run:
                                 if close_position(symbol):

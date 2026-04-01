@@ -25,7 +25,7 @@ class Config:
     MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.05"))
     MAX_OPEN_POSITIONS: int = int(os.getenv("MAX_OPEN_POSITIONS", "20"))
     STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))
-    TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.10"))
+    TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.30"))   # emergency ceiling only; trailing stop is primary exit
     MAX_DAILY_LOSS_PCT: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.05"))
 
     # Technical indicator parameters
@@ -70,8 +70,12 @@ class Config:
     KELLY_MIN_TRADES: int = int(os.getenv("KELLY_MIN_TRADES", "20"))          # min closed trades before Kelly activates
     KELLY_MIN_FRACTION: float = float(os.getenv("KELLY_MIN_FRACTION", "0.01")) # floor: never size below 1% of equity
 
-    # Trailing stop
-    TRAILING_STOP_PCT: float = float(os.getenv("TRAILING_STOP_PCT", "0.04"))   # close if price drops 4% from peak
+    # Trailing stop — tiered: tighter when gains are small, looser as the trend develops
+    TRAILING_STOP_PCT: float      = float(os.getenv("TRAILING_STOP_PCT",      "0.04"))  # gain < MID_TRIGGER:  4% trail
+    TRAILING_STOP_MID_PCT: float  = float(os.getenv("TRAILING_STOP_MID_PCT",  "0.05"))  # gain < HIGH_TRIGGER: 5% trail
+    TRAILING_STOP_HIGH_PCT: float = float(os.getenv("TRAILING_STOP_HIGH_PCT", "0.07"))  # gain >= HIGH_TRIGGER: 7% trail
+    TRAILING_MID_TRIGGER: float   = float(os.getenv("TRAILING_MID_TRIGGER",   "0.08"))  # loosen trail at +8% gain
+    TRAILING_HIGH_TRIGGER: float  = float(os.getenv("TRAILING_HIGH_TRIGGER",  "0.18"))  # loosen trail again at +18% gain
     BREAK_EVEN_TRIGGER_PCT: float = float(os.getenv("BREAK_EVEN_TRIGGER_PCT", "0.03"))  # once up 3%, never close below entry
 
     # Earnings blackout
