@@ -28,6 +28,17 @@ logger = get_logger(__name__)
 
 app = FastAPI(title="STOX Dashboard", docs_url=None, redoc_url=None)
 
+
+@app.on_event("startup")
+async def _auto_start_bot() -> None:
+    """Auto-start the trading bot after the HTTP server is fully up.
+    Deferring this past module-import time ensures /health responds to
+    Railway's health check before the bot's heavy imports (ML, yfinance,
+    sklearn) begin loading in the background thread."""
+    import asyncio
+    await asyncio.sleep(1)          # let uvicorn finish binding the port
+    bot_manager.start(dry_run=False)
+
 _DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
 
