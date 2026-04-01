@@ -798,6 +798,22 @@ class TradingBot:
                             self.portfolio.save()
                             hwm = current_price
 
+                        # Break-even stop: once the trade has been up BREAK_EVEN_TRIGGER_PCT
+                        # or more, never let it close below entry price.
+                        be_trigger = trade.entry_price * (1 + Config.BREAK_EVEN_TRIGGER_PCT)
+                        if hwm >= be_trigger and current_price <= trade.entry_price:
+                            logger.info(
+                                f"Break-even stop: {symbol} peaked at ${hwm:.2f} "
+                                f"(+{(hwm / trade.entry_price - 1):.1%}) — "
+                                f"price fell back to ${current_price:.2f} (entry ${trade.entry_price:.2f})"
+                            )
+                            if not self.dry_run:
+                                if close_position(symbol):
+                                    self.portfolio.close_trade(symbol, current_price, status="BREAK_EVEN")
+                            else:
+                                logger.info(f"[DRY RUN] Would break-even close {symbol}")
+                            continue
+
                         trail_floor = hwm * (1 - Config.TRAILING_STOP_PCT)
                         if current_price < trail_floor:
                             logger.info(

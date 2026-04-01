@@ -203,11 +203,13 @@ body {
 .badge-paper { background: rgba(88,166,255,0.15); color: var(--blue);   border: 1px solid rgba(88,166,255,0.4); }
 .badge-dry   { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.4); }
 
-.badge-open    { background: rgba(88,166,255,0.15); color: var(--blue);   border: 1px solid rgba(88,166,255,0.3); }
-.badge-closed  { background: rgba(63,185,80,0.15);  color: var(--green);  border: 1px solid rgba(63,185,80,0.3); }
-.badge-stopped { background: rgba(248,81,73,0.15);  color: var(--red);    border: 1px solid rgba(248,81,73,0.3); }
-.badge-profit  { background: rgba(63,185,80,0.2);   color: var(--green);  border: 1px solid rgba(63,185,80,0.4); font-weight: 700; }
-.badge-signal  { background: rgba(188,140,255,0.15);color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+.badge-open      { background: rgba(88,166,255,0.15);  color: var(--blue);   border: 1px solid rgba(88,166,255,0.3); }
+.badge-closed    { background: rgba(63,185,80,0.15);   color: var(--green);  border: 1px solid rgba(63,185,80,0.3); }
+.badge-stopped   { background: rgba(248,81,73,0.15);   color: var(--red);    border: 1px solid rgba(248,81,73,0.3); }
+.badge-profit    { background: rgba(63,185,80,0.2);    color: var(--green);  border: 1px solid rgba(63,185,80,0.4); font-weight: 700; }
+.badge-trail     { background: rgba(210,153,34,0.15);  color: var(--yellow); border: 1px solid rgba(210,153,34,0.3); }
+.badge-breakeven { background: rgba(139,148,158,0.15); color: var(--muted);  border: 1px solid rgba(139,148,158,0.3); }
+.badge-signal    { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
 
 .count-badge {
   display: inline-block;

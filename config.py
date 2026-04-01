@@ -25,7 +25,7 @@ class Config:
     MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.05"))
     MAX_OPEN_POSITIONS: int = int(os.getenv("MAX_OPEN_POSITIONS", "20"))
     STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))
-    TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.06"))
+    TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.10"))
     MAX_DAILY_LOSS_PCT: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.05"))
 
     # Technical indicator parameters
@@ -71,7 +71,8 @@ class Config:
     KELLY_MIN_FRACTION: float = float(os.getenv("KELLY_MIN_FRACTION", "0.01")) # floor: never size below 1% of equity
 
     # Trailing stop
-    TRAILING_STOP_PCT: float = float(os.getenv("TRAILING_STOP_PCT", "0.06"))   # close if price drops 6% from peak
+    TRAILING_STOP_PCT: float = float(os.getenv("TRAILING_STOP_PCT", "0.04"))   # close if price drops 4% from peak
+    BREAK_EVEN_TRIGGER_PCT: float = float(os.getenv("BREAK_EVEN_TRIGGER_PCT", "0.03"))  # once up 3%, never close below entry
 
     # Earnings blackout
     EARNINGS_BLACKOUT_DAYS: int = int(os.getenv("EARNINGS_BLACKOUT_DAYS", "2"))  # skip entry within N days of earnings

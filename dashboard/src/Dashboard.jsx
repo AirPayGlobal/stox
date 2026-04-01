@@ -319,6 +319,8 @@ const STATUS_CLASS = {
   CLOSED: 'badge-closed',
   STOPPED: 'badge-stopped',
   TOOK_PROFIT: 'badge-profit',
+  TRAILING_STOP: 'badge-trail',
+  BREAK_EVEN: 'badge-breakeven',
   SIGNAL_EXIT: 'badge-signal',
 }
 
