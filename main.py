@@ -57,6 +57,17 @@ from analysis.ml_signals import is_ml_approved
 from analysis.universe import get_full_universe
 from analysis.risk_analytics import record_equity, compute_analytics
 from utils.logger import get_logger
+# Upgrade 2: Partial exits
+from trading.partial_exits import PartialExitManager
+from trading.alpaca_partial import close_position_partial
+# Upgrade 3: ML pipeline with dynamic threshold + monthly retrain
+from analysis.ml_pipeline import get_dynamic_threshold, update_model_with_trade_outcomes
+# Upgrade 4: Dynamic pairs with Kalman filter
+from analysis.pairs_dynamic import screen_pairs_dynamic
+# Upgrade 5: Factor exposure monitor
+from analysis.factor_monitor import run_eod_factor_check
+# Upgrade 6: VWAP-referenced limit orders
+from trading.vwap_executor import VWAPExecutor, calculate_vwap
 
 logger = get_logger("main")
 
@@ -117,6 +128,9 @@ class TradingBot:
         self.risk = RiskManager()
         self.portfolio = Portfolio()
         self._running = True
+        self.partial_exits = PartialExitManager()        # Upgrade 2
+        self.vwap_executor = VWAPExecutor()              # Upgrade 6
+        self._last_ml_retrain_month: int = -1            # Upgrade 3: monthly retrain
 
         mode = "DRY RUN" if dry_run else Config.ALPACA_MODE.upper()
         logger.info(f"Bot initialised | mode={mode} | strategy={self.strategy.name}")
@@ -325,10 +339,11 @@ class TradingBot:
             if df_ind.empty:
                 continue
 
-            # ML signal booster — require minimum probability estimate; fails open during warmup
+            # ML signal booster — dynamic threshold tightens in BEAR/HIGH_VOL regimes
             if Config.ML_SIGNAL_ENABLED:
-                if not is_ml_approved(symbol, df, Config.ML_MIN_PROBABILITY):
-                    logger.info(f"Filter ML: {symbol} — below p={Config.ML_MIN_PROBABILITY:.2f}")
+                ml_threshold = get_dynamic_threshold(regime.value)
+                if not is_ml_approved(symbol, df, ml_threshold):
+                    logger.info(f"Filter ML: {symbol} — below p={ml_threshold:.2f} ({regime.value})")
                     filter_stats["ml"] += 1
                     continue
 
@@ -362,11 +377,10 @@ class TradingBot:
             )
 
             if not self.dry_run:
-                order_id = place_bracket_order(
-                    symbol=symbol,
-                    qty=shares,
-                    stop_loss_price=stop_loss,
-                    take_profit_price=take_profit,
+                # Upgrade 6: VWAP-referenced limit order for better fills
+                vwap = calculate_vwap(df, lookback_bars=20)
+                order_id = self.vwap_executor.place_entry_order(
+                    symbol=symbol, qty=shares, vwap=vwap
                 )
                 if order_id:
                     self.portfolio.open_trade(
@@ -380,7 +394,7 @@ class TradingBot:
                     self.risk.record_trade()
                     cash -= cost
             else:
-                logger.info(f"[DRY RUN] Would place: BUY {shares} {symbol} @ ${price:.2f}")
+                logger.info(f"[DRY RUN] Would place VWAP limit: BUY {shares} {symbol} @ ${price:.2f}")
 
         # Log filter funnel summary for diagnostics
         if buy_candidates:
@@ -602,10 +616,18 @@ class TradingBot:
                 data[sym] = df
 
         open_pairs = get_open_pairs()
-        signals = screen_pairs(data, open_pairs)
+        # Upgrade 4: Dynamic cointegration with Kalman filter hedge ratio
+        active_pair_tuples = [(p["symbol_a"], p["symbol_b"]) for p in open_pairs]
+        signals = screen_pairs_dynamic(data, active_pairs=active_pair_tuples if active_pair_tuples else None)
 
         # --- Manage exits first ---
-        for sym_a, sym_b, signal, z, beta in signals:
+        for sig_dict in signals:
+            sym_a  = sig_dict["symbol_a"]
+            sym_b  = sig_dict["symbol_b"]
+            signal = sig_dict["signal"]
+            z      = sig_dict["z_score"]
+            beta   = sig_dict["hedge_ratio"]
+
             if signal not in (PairSignal.EXIT, PairSignal.STOP):
                 continue
 
@@ -625,7 +647,7 @@ class TradingBot:
 
             logger.info(
                 f"Pairs {reason}: closing {pair['pair_id']} "
-                f"LONG {sym_long} / SHORT {sym_short} z={z:.2f}"
+                f"LONG {sym_long} / SHORT {sym_short} z={z:.2f} β={beta:.3f}"
             )
 
             if not self.dry_run:
@@ -644,7 +666,13 @@ class TradingBot:
             logger.debug(f"Pairs: max positions ({Config.PAIRS_MAX_POSITIONS}) reached")
             return
 
-        for sym_a, sym_b, signal, z, beta in signals:
+        for sig_dict in signals:
+            sym_a  = sig_dict["symbol_a"]
+            sym_b  = sig_dict["symbol_b"]
+            signal = sig_dict["signal"]
+            z      = sig_dict["z_score"]
+            beta   = sig_dict["hedge_ratio"]
+
             if signal not in (PairSignal.LONG_A_SHORT_B, PairSignal.LONG_B_SHORT_A):
                 continue
 
@@ -798,6 +826,30 @@ class TradingBot:
                             self.portfolio.save()
                             hwm = current_price
 
+                        # Upgrade 2: Partial exits — sell 33% at +8%, 33% at +15%, trail rest
+                        partial_actions = self.partial_exits.check_exits(
+                            symbol, trade, current_price, hwm
+                        )
+                        for action in partial_actions:
+                            logger.info(
+                                f"Partial exit {action.reason}: {symbol} "
+                                f"selling {action.shares_to_sell} shares "
+                                f"(+{action.trigger_pct:.1%} gain)"
+                            )
+                            if not self.dry_run:
+                                oid = close_position_partial(symbol, action.shares_to_sell)
+                                if oid:
+                                    self.partial_exits.record_partial(
+                                        symbol=symbol,
+                                        shares_sold=action.shares_to_sell,
+                                        price=current_price,
+                                        pct_gain=action.trigger_pct,
+                                    )
+                            else:
+                                logger.info(
+                                    f"[DRY RUN] Would partial exit {action.shares_to_sell} {symbol}"
+                                )
+
                         # Break-even stop: once the trade has been up BREAK_EVEN_TRIGGER_PCT
                         # or more, never let it close below entry price.
                         be_trigger = trade.entry_price * (1 + Config.BREAK_EVEN_TRIGGER_PCT)
@@ -929,6 +981,54 @@ class TradingBot:
                     logger.info("Risk metrics: " + " | ".join(parts))
             except Exception as exc:
                 logger.debug(f"Risk analytics error: {exc}")
+
+            # Upgrade 5: Daily factor exposure check
+            try:
+                factor_report = run_eod_factor_check(positions, equity)
+                alerts = factor_report.get("alerts", [])
+                if alerts:
+                    logger.warning(f"Factor alerts: {'; '.join(alerts)}")
+                else:
+                    beta = factor_report.get("portfolio_beta", "n/a")
+                    logger.info(f"Factor check OK | portfolio_beta={beta}")
+            except Exception as exc:
+                logger.debug(f"Factor monitor error: {exc}")
+
+            # Upgrade 3: Monthly ML retrain on closed trade outcomes
+            try:
+                current_month = datetime.now().month
+                if current_month != self._last_ml_retrain_month:
+                    closed = [
+                        {
+                            "symbol": t.symbol,
+                            "entry_price": t.entry_price,
+                            "exit_price": t.exit_price or t.entry_price,
+                            "pnl_pct": ((t.exit_price or t.entry_price) / t.entry_price - 1)
+                                       if t.entry_price > 0 else 0.0,
+                            "regime": "UNKNOWN",
+                            "sentiment_score": 0.0,
+                            "signal_score": 0.0,
+                            "sector": "UNKNOWN",
+                            "vix_at_entry": 0.0,
+                            "opened_at": t.opened_at,
+                        }
+                        for t in self.portfolio.trades
+                        if t.status != "OPEN" and t.exit_price is not None
+                    ]
+                    if closed:
+                        # Group by symbol and update
+                        by_sym: dict = {}
+                        for rec in closed:
+                            by_sym.setdefault(rec["symbol"], []).append(rec)
+                        for sym, recs in by_sym.items():
+                            update_model_with_trade_outcomes(sym, recs)
+                        logger.info(
+                            f"Monthly ML retrain: fed {len(closed)} closed trades "
+                            f"across {len(by_sym)} symbols"
+                        )
+                    self._last_ml_retrain_month = current_month
+            except Exception as exc:
+                logger.debug(f"Monthly ML retrain error: {exc}")
 
         except Exception as exc:
             logger.error(f"EoD summary failed: {exc}")

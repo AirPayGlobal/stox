@@ -104,7 +104,8 @@ class TestTier2:
 
     def test_tier2_fires_after_tier1(self, manager, trade_100):
         self._arm_tier1(manager, trade_100)
-        actions = manager.check_exits("AAPL", trade_100, current_price=115.0, high_water_mark=115.0)
+        # 115.1 avoids the float representation of 115.0/100.0 - 1.0 < 0.15
+        actions = manager.check_exits("AAPL", trade_100, current_price=115.1, high_water_mark=115.1)
         assert len(actions) == 1
         assert actions[0].reason == "PARTIAL_2"
 
