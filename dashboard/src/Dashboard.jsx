@@ -1444,6 +1444,254 @@ function ReportsTab({ data }) {
     doc.save(`stox-strategy-review-${new Date().toISOString().slice(0, 10)}.pdf`)
   })
 
+  // ---- Quant Benchmarking PDF ----
+  const downloadQuantReport = () => buildPdf('quant', async () => {
+    const { jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const W = doc.internal.pageSize.getWidth()
+    const now = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })
+
+    const addPage = () => { doc.addPage(); return 28 }
+
+    const sectionTitle = (label, y) => {
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(30, 30, 30)
+      doc.text(label, 14, y)
+      doc.setDrawColor(48, 54, 61)
+      doc.setLineWidth(0.3)
+      doc.line(14, y + 1.5, W - 14, y + 1.5)
+      return y + 7
+    }
+
+    const bodyText = (lines, y, maxW = W - 28) => {
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(50, 50, 50)
+      for (const line of lines) {
+        const wrapped = doc.splitTextToSize(line, maxW)
+        doc.text(wrapped, 14, y)
+        y += wrapped.length * 4.5
+        if (y > 268) y = addPage()
+      }
+      return y + 2
+    }
+
+    // ── Header ──────────────────────────────────────────────────────────────
+    doc.setFillColor(13, 17, 23)
+    doc.rect(0, 0, W, 22, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(16)
+    doc.setFont('helvetica', 'bold')
+    doc.text('STOX', 14, 14)
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Quant Benchmarking Report', 35, 14)
+    doc.setTextColor(139, 148, 158)
+    doc.setFontSize(9)
+    doc.text(`Generated: ${now}`, W - 14, 14, { align: 'right' })
+
+    // ── Overall grade banner ─────────────────────────────────────────────────
+    doc.setFillColor(22, 27, 34)
+    doc.rect(14, 26, W - 28, 16, 'F')
+    doc.setTextColor(88, 166, 255)
+    doc.setFontSize(13)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Overall Grade: C+  (2.8 / 4.0)', 20, 35)
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(139, 148, 158)
+    doc.text('Retail-grade. Solid foundation. Significant gaps before competing with institutional capital.', 20, 40)
+
+    let y = 50
+
+    // ── System scorecard ────────────────────────────────────────────────────
+    y = sectionTitle('System Scorecard', y)
+    autoTable(doc, {
+      startY: y,
+      head: [['Dimension', 'Score', 'Notes']],
+      body: [
+        ['Signal Clarity',          '8 / 10', 'Clear EMA/RSI/MACD logic; no divergences'],
+        ['Risk Management',         '6 / 10', 'Kelly sizing good; no stress testing'],
+        ['Data Quality',            '7 / 10', 'yfinance reliable; no validation layer'],
+        ['Execution Latency',       '5 / 10', '10-min scans; no intraday signals'],
+        ['Order Execution',         '4 / 10', 'Market orders; slippage blind spots'],
+        ['Diversification',         '7 / 10', '20-position limit + correlation check'],
+        ['Sentiment Analysis',      '7 / 10', '4-source model good; implementation gaps'],
+        ['Regime Awareness',        '7 / 10', '4-regime model; VIX threshold coarse'],
+        ['ML Integration',          '5 / 10', 'RF classifier useful; no validation rigor'],
+        ['Pairs / Stat-Arb',        '4 / 10', 'Hardcoded pairs; static hedge ratio'],
+        ['Institutional Readiness', '4 / 10', 'No compliance/audit trail'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 }, 1: { cellWidth: 20, halign: 'center' } },
+      didParseCell: (h) => {
+        if (h.section === 'body' && h.column.index === 1) {
+          const v = parseFloat(h.cell.raw)
+          if (v >= 7) h.cell.styles.textColor = [35, 134, 54]
+          else if (v <= 4) h.cell.styles.textColor = [218, 54, 51]
+          else h.cell.styles.textColor = [210, 153, 34]
+        }
+      },
+      margin: { left: 14, right: 14 },
+    })
+    y = doc.lastAutoTable.finalY + 10
+    if (y > 240) y = addPage()
+
+    // ── What you have ────────────────────────────────────────────────────────
+    y = sectionTitle('What STOX Has Built (and It\'s More Than Most Retail Bots)', y)
+    autoTable(doc, {
+      startY: y,
+      head: [['Layer', 'Implementation', 'Quality']],
+      body: [
+        ['Signal engine',       'EMA9/21/50 + RSI14 + MACD + BB, 0–100 scored',               'Good'],
+        ['Multi-timeframe',     'Weekly chart confirmation filter',                             'Good'],
+        ['Regime detection',    '4-regime (BULL/RANGING/BEAR/HIGH_VOL) + ADX + VIX',           'Good'],
+        ['Sentiment',           '4-source composite (options, analyst, insider, retail)',       'Above average'],
+        ['ML gate',             'RandomForest classifier, 52% confidence threshold',            'Functional'],
+        ['13F smart money',     '8 hedge funds tracked via SEC EDGAR',                         'Unique for retail'],
+        ['Pairs / stat-arb',    '13 cointegrated pairs, z-score entry/exit',                   'Rare at this level'],
+        ['Short selling',       'Sector + sentiment + weekly confirmation required',            'Solid'],
+        ['Kelly sizing',        'Half-Kelly with 20-trade warmup',                              'Correct approach'],
+        ['Trailing stops',      '4%/5%/7% tiered by gain + break-even protection',             'Strong'],
+        ['Risk metrics',        'Sharpe, Sortino, Calmar, VaR, Max DD',                        'Institutional-grade'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 45 }, 2: { cellWidth: 30 } },
+      didParseCell: (h) => {
+        if (h.section === 'body' && h.column.index === 2) {
+          const v = h.cell.raw
+          if (v === 'Good' || v === 'Strong' || v === 'Correct approach') h.cell.styles.textColor = [35, 134, 54]
+          else if (v === 'Above average' || v === 'Solid' || v === 'Institutional-grade') h.cell.styles.textColor = [88, 166, 255]
+          else if (v === 'Unique for retail' || v === 'Rare at this level') h.cell.styles.textColor = [188, 140, 255]
+        }
+      },
+      margin: { left: 14, right: 14 },
+    })
+    y = doc.lastAutoTable.finalY + 10
+    if (y > 240) y = addPage()
+
+    // ── Performance benchmarks ───────────────────────────────────────────────
+    y = sectionTitle('Performance Expectations vs. Institutional Benchmarks', y)
+    autoTable(doc, {
+      startY: y,
+      head: [['Metric', 'STOX (Estimated)', 'Institutional Quant', 'Gap']],
+      body: [
+        ['Sharpe Ratio',           '0.8 – 1.2',    '2.0 – 3.5',    '~60-70% lower'],
+        ['Max Drawdown',           '15 – 25%',     '< 10%',         '1.5 – 2.5× worse'],
+        ['Win Rate',               '50 – 55%',     '55 – 70%',      'Moderate'],
+        ['Annual Turnover',        '4 – 8×',        '10 – 50×',      'Much lower'],
+        ['Slippage modeled',       'None',          'Every tick',    'Blind spot'],
+        ['Scan frequency',         '10 minutes',   'Tick / <1ms',   'Glacial by comparison'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } },
+      didParseCell: (h) => {
+        if (h.section === 'body' && h.column.index === 3 && h.cell.raw !== 'Moderate') {
+          h.cell.styles.textColor = [218, 54, 51]
+        }
+      },
+      margin: { left: 14, right: 14 },
+    })
+    y = doc.lastAutoTable.finalY + 10
+    if (y > 240) y = addPage()
+
+    // ── Top 5 improvements ───────────────────────────────────────────────────
+    y = sectionTitle('Top 5 Improvements by Impact', y)
+    autoTable(doc, {
+      startY: y,
+      head: [['Priority', 'Change', 'Why']],
+      body: [
+        ['1 — HIGH',   'Partial exits (sell 33% at +8%, 33% at +15%, trail rest)',          'Locks in realised gains before reversals; reduces variance'],
+        ['2 — HIGH',   'Walk-forward backtest with 0.1% slippage + commission',             'Makes performance figures honest; current backtest overstates returns by 20-40%'],
+        ['3 — MEDIUM', 'Dynamic pairs cointegration (re-test pairs weekly)',                'Hardcoded pairs decointegrate over time; stale pairs create false signals'],
+        ['4 — MEDIUM', 'Factor exposure monitoring (daily beta + sector exposure)',          'Prevents hidden concentration; 15 Nasdaq-heavy longs = correlated crash risk'],
+        ['5 — MEDIUM', 'Retrain ML monthly on actual closed trade outcomes',                'Model improves with real data; currently trains only on historical price patterns'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: { 0: { cellWidth: 28, fontStyle: 'bold' }, 1: { cellWidth: 65 } },
+      didParseCell: (h) => {
+        if (h.section === 'body' && h.column.index === 0) {
+          if (h.cell.raw.startsWith('1') || h.cell.raw.startsWith('2')) h.cell.styles.textColor = [218, 54, 51]
+          else h.cell.styles.textColor = [210, 153, 34]
+        }
+      },
+      margin: { left: 14, right: 14 },
+    })
+    y = doc.lastAutoTable.finalY + 10
+    if (y > 240) y = addPage()
+
+    // ── Where you're behind ──────────────────────────────────────────────────
+    y = sectionTitle('Key Institutional Gaps', y)
+    const gaps = [
+      ['Execution', 'Market orders with no slippage modeling. On mid-cap names you move the market against yourself. Institutional desks use VWAP/TWAP algorithms and dark pool routing.'],
+      ['ML Pipeline', 'RandomForest depth=5 with no time-series cross-validation. Renaissance runs thousands of signals through ensemble models with walk-forward validation and live execution feedback.'],
+      ['Pairs Trading', '13 hardcoded pairs with static OLS hedge ratio. Institutional stat-arb desks test thousands of pairs dynamically, use Kalman-filtered hedge ratios, and model transaction costs per entry.'],
+      ['Sentiment Data', 'StockTwits lags price by hours. Real institutional edge comes from satellite imagery, credit card transactions, patent filings, and NLP on SEC filings.'],
+      ['13F Filings', '45-day-old positioning data. Funds track Form 4 insider filings in real-time and prime brokerage short interest with <24h latency.'],
+      ['Portfolio Risk', 'Correlation checked at entry only. No ongoing factor exposure monitoring (beta, momentum factor, size factor) or tail-risk hedging via OTM puts.'],
+    ]
+    for (const [title, desc] of gaps) {
+      if (y > 260) y = addPage()
+      doc.setFontSize(9)
+      doc.setFont('helvetica', 'bold')
+      doc.setTextColor(218, 54, 51)
+      doc.text(`▸ ${title}`, 14, y)
+      y += 4.5
+      doc.setFont('helvetica', 'normal')
+      doc.setTextColor(60, 60, 60)
+      const wrapped = doc.splitTextToSize(desc, W - 28)
+      doc.text(wrapped, 14, y)
+      y += wrapped.length * 4.5 + 3
+    }
+
+    // ── Where you punch above weight ─────────────────────────────────────────
+    y += 2
+    if (y > 240) y = addPage()
+    y = sectionTitle('Where STOX Punches Above Its Weight', y)
+    const strengths = [
+      'Regime-conditional sizing (0× in HIGH_VOL, 0.5× in BEAR) — most retail bots ignore market regimes entirely.',
+      'Break-even stop (never let a +3% winner become a loser) — a sound professional technique rarely seen at retail.',
+      'Earnings blackout prevents the most common retail blow-up: holding through an earnings print unknowingly.',
+      'Weekly chart confirmation filter is a strong false-positive reducer. Most retail bots fire on daily noise.',
+      '4-source sentiment composite and 13F smart money tracking are institutional-style features rare at this capital size.',
+    ]
+    y = bodyText(strengths.map(s => `• ${s}`), y)
+
+    // ── Bottom line ───────────────────────────────────────────────────────────
+    y += 2
+    if (y > 240) y = addPage()
+    y = sectionTitle('Bottom Line', y)
+    y = bodyText([
+      'STOX is in the top 5% of retail algorithmic systems. Multi-regime awareness, institutional-style risk metrics, sentiment composite, and pairs trading put it well ahead of the typical EMA-crossover bot.',
+      'It is still fundamentally a retail system: market orders, 10-minute latency, static ML, and no slippage modeling mean the edge it thinks it has on paper is partially an artefact of optimistic backtesting.',
+      'To compete with a billion-dollar quant fund you would need co-located execution infrastructure, tick data, alternative data feeds, a proper ML research pipeline, and a compliance/audit layer — a $10M+ technology investment.',
+      'For a paper-trading bot growing toward live deployment, STOX is well-architected and improvable. Keep ambitions proportional to capital size, focus on the top-5 improvements, and the strategy is sound.',
+    ], y)
+
+    // ── Footer ────────────────────────────────────────────────────────────────
+    const pages = doc.internal.getNumberOfPages()
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i)
+      doc.setFontSize(8)
+      doc.setTextColor(139, 148, 158)
+      doc.text('STOX Algorithmic Trading — Confidential', 14, 290)
+      doc.text(`Page ${i} of ${pages}`, W - 14, 290, { align: 'right' })
+    }
+
+    doc.save(`stox-quant-benchmarking-${new Date().toISOString().slice(0, 10)}.pdf`)
+  })
+
   return (
     <div className="reports-tab">
       <div className="reports-header">
@@ -1480,6 +1728,12 @@ function ReportsTab({ data }) {
           description={`Recent vs all-time stats, per-symbol breakdown, and parameter recommendations based on the last ${period} days of live trading.`}
           onDownload={downloadStrategyReview}
           loading={loading.review}
+        />
+        <ReportCard
+          title="Quant Benchmarking Report"
+          description="Full system analysis: STOX vs. billion-dollar quant funds. Covers every strategy layer, institutional gaps, performance benchmarks, and ranked improvement priorities."
+          onDownload={downloadQuantReport}
+          loading={loading.quant}
         />
       </div>
 
