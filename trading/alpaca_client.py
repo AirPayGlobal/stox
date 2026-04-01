@@ -226,7 +226,7 @@ def get_portfolio_history(period: str = "1M", timeframe: str = "1D") -> list[dic
         from datetime import datetime as _dt
 
         req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe, extended_hours=False)
-        history = get_trading_client().get_portfolio_history(filter=req)
+        history = get_trading_client().get_portfolio_history(req)
 
         # Forward-fill: carry the last known equity value into null slots
         last_known = None
