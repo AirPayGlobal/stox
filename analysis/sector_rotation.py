@@ -61,37 +61,70 @@ SYMBOL_TO_SECTOR: dict[str, str] = {
     "CSCO": "XLK", "ACN":  "XLK", "CRM":  "XLK", "TXN":  "XLK",
     "ADBE": "XLK", "QCOM": "XLK", "AMD":  "XLK", "INTC": "XLK",
     "NOW":  "XLK", "INTU": "XLK",
+    "AMAT": "XLK", "KLAC": "XLK", "MRVL": "XLK", "NET":  "XLK",
+    "MU":   "XLK", "LRCX": "XLK", "PANW": "XLK", "SNPS": "XLK",
+    "CDNS": "XLK", "FTNT": "XLK", "ANSS": "XLK", "KEYS": "XLK",
+    "GLW":  "XLK", "MPWR": "XLK", "ON":   "XLK", "TER":  "XLK",
     # Communication (XLC)
     "GOOGL": "XLC", "GOOG": "XLC", "META": "XLC", "NFLX": "XLC",
     "DIS":  "XLC", "CMCSA": "XLC", "VZ": "XLC", "T": "XLC",
+    "TTWO": "XLC", "EA":   "XLC", "PARA": "XLC", "WBD":  "XLC",
+    "LUMN": "XLC", "TMUS": "XLC",
     # Consumer Discretionary (XLY)
     "AMZN": "XLY", "TSLA": "XLY", "HD":   "XLY", "NKE":  "XLY",
     "MCD":  "XLY", "SBUX": "XLY", "LOW":  "XLY", "TGT":  "XLY",
     "BKNG": "XLY", "MAR":  "XLY",
+    "MGM":  "XLY", "ROST": "XLY", "TJX":  "XLY", "LVS":  "XLY",
+    "WYNN": "XLY", "F":    "XLY", "GM":   "XLY", "EBAY": "XLY",
+    "BBY":  "XLY", "POOL": "XLY", "PHM":  "XLY", "DHI":  "XLY",
+    "LEN":  "XLY", "NVR":  "XLY", "HLT":  "XLY", "RCL":  "XLY",
     # Health Care (XLV)
     "UNH":  "XLV", "JNJ":  "XLV", "LLY":  "XLV", "ABBV": "XLV",
     "MRK":  "XLV", "TMO":  "XLV", "ABT":  "XLV", "DHR":  "XLV",
     "AMGN": "XLV", "BMY":  "XLV", "PFE":  "XLV", "ISRG": "XLV",
     "GILD": "XLV", "MDT":  "XLV",
+    "BIIB": "XLV", "HOLX": "XLV", "REGN": "XLV", "VRTX": "XLV",
+    "ZBH":  "XLV", "BAX":  "XLV", "BSX":  "XLV", "EW":   "XLV",
+    "IQV":  "XLV", "MCK":  "XLV", "CAH":  "XLV", "CNC":  "XLV",
+    "HCA":  "XLV", "CI":   "XLV", "CVS":  "XLV", "HUM":  "XLV",
     # Financials (XLF)
     "BRK.B": "XLF", "JPM": "XLF", "V":    "XLF", "MA":   "XLF",
     "BAC":   "XLF", "WFC": "XLF", "GS":   "XLF", "MS":   "XLF",
     "AXP":   "XLF", "BLK": "XLF", "SCHW": "XLF",
+    "C":    "XLF", "USB":  "XLF", "PNC":  "XLF", "TFC":  "XLF",
+    "COF":  "XLF", "CB":   "XLF", "MMC":  "XLF", "AON":  "XLF",
+    "ICE":  "XLF", "CME":  "XLF", "SPGI": "XLF", "MCO":  "XLF",
+    "FIS":  "XLF", "FISV": "XLF", "AFL":  "XLF", "MET":  "XLF",
     # Consumer Staples (XLP)
     "PG":  "XLP", "KO":  "XLP", "PEP": "XLP", "COST": "XLP",
     "WMT": "XLP", "PM":  "XLP", "MO":  "XLP", "CL":   "XLP",
+    "MDLZ": "XLP", "KHC": "XLP", "GIS": "XLP", "HSY":  "XLP",
+    "STZ":  "XLP", "KMB": "XLP", "SYY": "XLP", "CAG":  "XLP",
     # Energy (XLE)
     "XOM": "XLE", "CVX": "XLE", "COP": "XLE", "EOG":  "XLE",
     "SLB": "XLE", "PSX": "XLE", "MPC": "XLE",
+    "DVN": "XLE", "HAL": "XLE", "OXY": "XLE", "PXD":  "XLE",
+    "FANG": "XLE", "BKR": "XLE", "VLO": "XLE", "HES":  "XLE",
+    "KMI": "XLE", "WMB": "XLE", "OKE": "XLE",
     # Industrials (XLI)
     "RTX": "XLI", "UPS": "XLI", "HON": "XLI", "CAT":  "XLI",
     "GE":  "XLI", "BA":  "XLI", "MMM": "XLI", "DE":   "XLI",
+    "LMT": "XLI", "NOC": "XLI", "GD":  "XLI", "FDX":  "XLI",
+    "CSX": "XLI", "NSC": "XLI", "EMR": "XLI", "ETN":  "XLI",
+    "ROK": "XLI", "DOV": "XLI", "PH":  "XLI", "ITW":  "XLI",
     # Materials (XLB)
     "LIN": "XLB", "APD": "XLB", "ECL": "XLB", "NEM":  "XLB",
+    "FCX": "XLB", "NUE": "XLB", "VMC": "XLB", "MLM":  "XLB",
+    "ALB": "XLB", "CF":  "XLB", "MOS": "XLB", "IP":   "XLB",
     # Real Estate (XLRE)
     "AMT": "XLRE", "PLD": "XLRE", "CCI": "XLRE",
+    "EQIX": "XLRE", "PSA": "XLRE", "O":   "XLRE", "WELL": "XLRE",
+    "DLR": "XLRE", "EXR": "XLRE", "AVB": "XLRE", "EQR":  "XLRE",
+    "VTR": "XLRE", "SPG": "XLRE", "ARE": "XLRE",
     # Utilities (XLU)
     "NEE": "XLU", "DUK": "XLU", "SO":  "XLU", "D":    "XLU",
+    "AEP": "XLU", "EXC": "XLU", "XEL": "XLU", "SRE":  "XLU",
+    "ED":  "XLU", "ETR": "XLU", "PCG": "XLU", "EIX":  "XLU",
 }
 
 # ---------------------------------------------------------------------------
