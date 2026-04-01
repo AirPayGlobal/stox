@@ -245,7 +245,7 @@ def get_portfolio_history(period: str = "1M", timeframe: str = "1D") -> list[dic
         return []
 
 
-(symbol: str, after_iso: str) -> tuple[Optional[float], str]:
+def get_filled_exit_price(symbol: str, after_iso: str) -> tuple[Optional[float], str]:
     """
     Scan recent closed orders to find the fill price of a bracket exit
     (take-profit limit-sell or stop-loss stop-sell) for a long position.
