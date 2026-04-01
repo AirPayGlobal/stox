@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket, fetchReview } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket, fetchReview, fetchMarketStatus } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -81,9 +81,8 @@ function MarketStatusBadge() {
 
   useEffect(() => {
     const check = () =>
-      fetch('/api/market-status')
-        .then(r => r.json())
-        .then(d => setIsOpen(d.is_open))
+      fetchMarketStatus()
+        .then(r => setIsOpen(r.data.is_open))
         .catch(() => setIsOpen(null))
     check()
     const id = setInterval(check, 60_000)
