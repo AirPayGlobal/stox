@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket, fetchReview } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -1045,10 +1045,437 @@ function LogViewer() {
 }
 
 
+// ------------------------------------------------------------------ Reports Tab
+
+const REPORT_PERIODS = [
+  { label: '7 days',  days: 7  },
+  { label: '30 days', days: 30 },
+  { label: '90 days', days: 90 },
+]
+
+function ReportCard({ title, description, onDownload, loading }) {
+  return (
+    <div className="report-card">
+      <div className="report-card-body">
+        <div className="report-card-title">{title}</div>
+        <div className="report-card-desc">{description}</div>
+      </div>
+      <button
+        className="btn btn-primary report-dl-btn"
+        onClick={onDownload}
+        disabled={loading}
+      >
+        {loading ? 'Generating…' : '↓ Download PDF'}
+      </button>
+    </div>
+  )
+}
+
+function ReportsTab({ data }) {
+  const [period, setPeriod] = useState(30)
+  const [loading, setLoading] = useState({})
+
+  const setLoad = (key, val) => setLoading(l => ({ ...l, [key]: val }))
+
+  const buildPdf = async (key, generate) => {
+    setLoad(key, true)
+    try {
+      await generate()
+    } catch (err) {
+      alert('PDF generation failed: ' + (err.message || err))
+    } finally {
+      setLoad(key, false)
+    }
+  }
+
+  // ---- Performance Summary PDF ----
+  const downloadPerformance = () => buildPdf('perf', async () => {
+    const { jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+
+    const analyticsRes = await fetchAnalytics().catch(() => ({ data: null }))
+    const reviewRes    = await fetchReview(period).catch(() => ({ data: null }))
+    const analytics    = analyticsRes.data
+    const review       = reviewRes.data
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const W = doc.internal.pageSize.getWidth()
+    const now = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })
+
+    // Header bar
+    doc.setFillColor(13, 17, 23)
+    doc.rect(0, 0, W, 22, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(16)
+    doc.setFont('helvetica', 'bold')
+    doc.text('STOX', 14, 14)
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Performance Summary Report', 35, 14)
+    doc.setTextColor(139, 148, 158)
+    doc.setFontSize(9)
+    doc.text(`Generated: ${now}  ·  Period: last ${period} days`, W - 14, 14, { align: 'right' })
+
+    // Account metrics
+    const { account, summary } = data
+    const pnl = summary?.total_pnl ?? 0
+    const winRate = summary?.win_rate ?? 0
+
+    doc.setTextColor(30, 30, 30)
+    doc.setFontSize(13)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Account Overview', 14, 34)
+
+    autoTable(doc, {
+      startY: 38,
+      head: [['Metric', 'Value']],
+      body: [
+        ['Portfolio Equity',   account?.equity != null ? `$${Number(account.equity).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'],
+        ['Cash Balance',       account?.cash   != null ? `$${Number(account.cash).toLocaleString('en-US',   { minimumFractionDigits: 2 })}` : '—'],
+        ['Buying Power',       account?.buying_power != null ? `$${Number(account.buying_power).toLocaleString('en-US', { minimumFractionDigits: 2 })}` : '—'],
+        ['Realised P&L',       `$${pnl.toLocaleString('en-US', { minimumFractionDigits: 2 })}  (${pnl >= 0 ? '+' : ''}${((pnl / (account?.equity - pnl || 1)) * 100).toFixed(2)}%)`],
+        ['Closed Trades',      String(summary?.total_trades ?? 0)],
+        ['Win Rate',           `${(winRate * 100).toFixed(1)}%`],
+        ['Profit Factor',      summary?.profit_factor === Infinity ? '∞' : (summary?.profit_factor ?? 0).toFixed(2) + 'x'],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold' },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 70 } },
+      margin: { left: 14, right: 14 },
+    })
+
+    // Risk metrics
+    if (analytics) {
+      const y = doc.lastAutoTable.finalY + 10
+      doc.setFontSize(13)
+      doc.setFont('helvetica', 'bold')
+      doc.text('Risk Metrics', 14, y)
+
+      autoTable(doc, {
+        startY: y + 4,
+        head: [['Metric', 'Value', 'Benchmark']],
+        body: [
+          ['Sharpe Ratio',      analytics.sharpe   ?? '—', '≥ 1.0 (good)'],
+          ['Sortino Ratio',     analytics.sortino  ?? '—', '≥ 1.0 (good)'],
+          ['Calmar Ratio',      analytics.calmar   ?? '—', '≥ 0.5 (acceptable)'],
+          ['Max Drawdown',      analytics.max_drawdown_pct != null ? `${analytics.max_drawdown_pct}%` : '—', '< 20% (target)'],
+          ['VaR (95%, 1-day)',  analytics.var_95_pct != null ? `${analytics.var_95_pct}%` : '—', '< 2% (target)'],
+          ['Total Return',      analytics.total_return_pct != null ? `${analytics.total_return_pct}%` : '—', '> 0%'],
+        ],
+        theme: 'striped',
+        headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold' },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 70 }, 2: { textColor: [100, 100, 100] } },
+        margin: { left: 14, right: 14 },
+      })
+    }
+
+    // Strategy review / top performers
+    const stats = review?.stats?.recent || review?.stats?.all_time
+    if (stats && stats.count > 0) {
+      const y2 = doc.lastAutoTable.finalY + 10
+      doc.setFontSize(13)
+      doc.setFont('helvetica', 'bold')
+      doc.text(`Strategy Review (last ${period} days)`, 14, y2)
+
+      const symStats = review.symbol_stats || {}
+      const symbols  = Object.entries(symStats).sort((a, b) => (b[1].total_pnl || 0) - (a[1].total_pnl || 0))
+      const topRows  = symbols.slice(0, 10).map(([sym, s]) => [
+        sym,
+        String(s.count ?? 0),
+        `${((s.win_rate || 0) * 100).toFixed(0)}%`,
+        `$${(s.total_pnl || 0).toFixed(2)}`,
+        `${((s.avg_pnl_pct || 0) * 100).toFixed(2)}%`,
+      ])
+
+      if (topRows.length > 0) {
+        autoTable(doc, {
+          startY: y2 + 4,
+          head: [['Symbol', 'Trades', 'Win Rate', 'Total P&L', 'Avg P&L %']],
+          body: topRows,
+          theme: 'striped',
+          headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold' },
+          margin: { left: 14, right: 14 },
+        })
+      }
+    }
+
+    // Footer
+    const pages = doc.internal.getNumberOfPages()
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i)
+      doc.setFontSize(8)
+      doc.setTextColor(139, 148, 158)
+      doc.text('STOX Algorithmic Trading — Confidential', 14, 290)
+      doc.text(`Page ${i} of ${pages}`, W - 14, 290, { align: 'right' })
+    }
+
+    doc.save(`stox-performance-${new Date().toISOString().slice(0, 10)}.pdf`)
+  })
+
+  // ---- Trade History PDF ----
+  const downloadTradeHistory = () => buildPdf('trades', async () => {
+    const { jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
+    const W   = doc.internal.pageSize.getWidth()
+    const now = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })
+
+    // Header
+    doc.setFillColor(13, 17, 23)
+    doc.rect(0, 0, W, 22, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(16)
+    doc.setFont('helvetica', 'bold')
+    doc.text('STOX', 14, 14)
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Trade History Report', 35, 14)
+    doc.setTextColor(139, 148, 158)
+    doc.setFontSize(9)
+    doc.text(`Generated: ${now}`, W - 14, 14, { align: 'right' })
+
+    const { trades, summary } = data
+
+    // Summary row
+    doc.setTextColor(30, 30, 30)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    doc.text(
+      `Total trades: ${summary?.total_trades ?? 0}  ·  Win rate: ${((summary?.win_rate ?? 0) * 100).toFixed(1)}%  ·  Realised P&L: $${(summary?.total_pnl ?? 0).toFixed(2)}  ·  Profit factor: ${summary?.profit_factor === Infinity ? '∞' : (summary?.profit_factor ?? 0).toFixed(2)}x`,
+      14, 30
+    )
+
+    const closed = trades.filter(t => t.status !== 'OPEN')
+    const rows   = closed.map(t => [
+      t.symbol,
+      String(t.shares ?? ''),
+      t.entry_price != null ? `$${Number(t.entry_price).toFixed(2)}` : '—',
+      t.exit_price  != null ? `$${Number(t.exit_price).toFixed(2)}`  : '—',
+      t.pnl != null ? `$${Number(t.pnl).toFixed(2)}` : '—',
+      t.pnl_pct != null ? `${(t.pnl_pct * 100).toFixed(2)}%` : '—',
+      t.status,
+      t.opened_at ? new Date(t.opened_at).toLocaleDateString('en-US') : '—',
+      t.closed_at ? new Date(t.closed_at).toLocaleDateString('en-US') : '—',
+    ])
+
+    autoTable(doc, {
+      startY: 34,
+      head: [['Symbol', 'Shares', 'Entry', 'Exit', 'P&L ($)', 'P&L %', 'Status', 'Opened', 'Closed']],
+      body: rows.length > 0 ? rows : [['No closed trades in history', '', '', '', '', '', '', '', '']],
+      theme: 'striped',
+      headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: {
+        4: { halign: 'right' },
+        5: { halign: 'right' },
+      },
+      didParseCell: (hookData) => {
+        if (hookData.section === 'body' && hookData.column.index === 4) {
+          const val = hookData.cell.raw
+          if (typeof val === 'string' && val.startsWith('$-')) {
+            hookData.cell.styles.textColor = [218, 54, 51]
+          } else if (typeof val === 'string' && val.startsWith('$') && val !== '$—') {
+            hookData.cell.styles.textColor = [35, 134, 54]
+          }
+        }
+      },
+      margin: { left: 14, right: 14 },
+    })
+
+    // Footer
+    const pages = doc.internal.getNumberOfPages()
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i)
+      doc.setFontSize(8)
+      doc.setTextColor(139, 148, 158)
+      doc.text('STOX Algorithmic Trading — Confidential', 14, doc.internal.pageSize.getHeight() - 7)
+      doc.text(`Page ${i} of ${pages}`, W - 14, doc.internal.pageSize.getHeight() - 7, { align: 'right' })
+    }
+
+    doc.save(`stox-trades-${new Date().toISOString().slice(0, 10)}.pdf`)
+  })
+
+  // ---- Strategy Review PDF ----
+  const downloadStrategyReview = () => buildPdf('review', async () => {
+    const { jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+
+    const reviewRes = await fetchReview(period)
+    const review    = reviewRes.data
+    const stats     = review?.stats || {}
+    const recs      = review?.recommendations || []
+    const recent    = stats.recent || {}
+    const allTime   = stats.all_time || {}
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const W   = doc.internal.pageSize.getWidth()
+    const now = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })
+
+    // Header
+    doc.setFillColor(13, 17, 23)
+    doc.rect(0, 0, W, 22, 'F')
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(16)
+    doc.setFont('helvetica', 'bold')
+    doc.text('STOX', 14, 14)
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Strategy Review Report', 35, 14)
+    doc.setTextColor(139, 148, 158)
+    doc.setFontSize(9)
+    doc.text(`Generated: ${now}  ·  Period: last ${period} days`, W - 14, 14, { align: 'right' })
+
+    // Recent vs all-time stats
+    doc.setTextColor(30, 30, 30)
+    doc.setFontSize(13)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Performance Statistics', 14, 34)
+
+    autoTable(doc, {
+      startY: 38,
+      head: [['Metric', `Last ${period} days`, 'All Time']],
+      body: [
+        ['Trades',        String(recent.count ?? 0),       String(allTime.count ?? 0)],
+        ['Win Rate',      `${((recent.win_rate ?? 0) * 100).toFixed(1)}%`,    `${((allTime.win_rate ?? 0) * 100).toFixed(1)}%`],
+        ['Profit Factor', recent.profit_factor === Infinity ? '∞' : (recent.profit_factor ?? 0).toFixed(2) + 'x', allTime.profit_factor === Infinity ? '∞' : (allTime.profit_factor ?? 0).toFixed(2) + 'x'],
+        ['Total P&L',     `$${(recent.total_pnl ?? 0).toFixed(2)}`,  `$${(allTime.total_pnl ?? 0).toFixed(2)}`],
+        ['Avg P&L/trade', `$${(recent.avg_pnl ?? 0).toFixed(2)}`,    `$${(allTime.avg_pnl ?? 0).toFixed(2)}`],
+        ['Avg P&L %',     `${((recent.avg_pnl_pct ?? 0) * 100).toFixed(2)}%`, `${((allTime.avg_pnl_pct ?? 0) * 100).toFixed(2)}%`],
+        ['Biggest Win',   `$${(recent.biggest_win ?? 0).toFixed(2)}`,  `$${(allTime.biggest_win ?? 0).toFixed(2)}`],
+        ['Biggest Loss',  `$${(recent.biggest_loss ?? 0).toFixed(2)}`, `$${(allTime.biggest_loss ?? 0).toFixed(2)}`],
+      ],
+      theme: 'striped',
+      headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold' },
+      columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60 } },
+      margin: { left: 14, right: 14 },
+    })
+
+    // Per-symbol stats
+    const symStats = review?.symbol_stats || {}
+    const symbols  = Object.entries(symStats).sort((a, b) => (b[1].total_pnl || 0) - (a[1].total_pnl || 0))
+    if (symbols.length > 0) {
+      const y = doc.lastAutoTable.finalY + 10
+      doc.setFontSize(13)
+      doc.setFont('helvetica', 'bold')
+      doc.text('Per-Symbol Breakdown', 14, y)
+
+      autoTable(doc, {
+        startY: y + 4,
+        head: [['Symbol', 'Trades', 'Wins', 'Win Rate', 'Total P&L', 'Avg P&L %', 'Best', 'Worst']],
+        body: symbols.map(([sym, s]) => [
+          sym,
+          String(s.count ?? 0),
+          String(s.wins ?? 0),
+          `${((s.win_rate || 0) * 100).toFixed(0)}%`,
+          `$${(s.total_pnl || 0).toFixed(2)}`,
+          `${((s.avg_pnl_pct || 0) * 100).toFixed(2)}%`,
+          `$${(s.biggest_win || 0).toFixed(2)}`,
+          `$${(s.biggest_loss || 0).toFixed(2)}`,
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        margin: { left: 14, right: 14 },
+      })
+    }
+
+    // Recommendations
+    if (recs.length > 0) {
+      const y3 = doc.lastAutoTable.finalY + 10
+      doc.setFontSize(13)
+      doc.setFont('helvetica', 'bold')
+      doc.text('Parameter Recommendations', 14, y3)
+
+      autoTable(doc, {
+        startY: y3 + 4,
+        head: [['Priority', 'Parameter', 'Current', 'Recommended', 'Reason']],
+        body: recs.map(r => [
+          (r.priority || '').toUpperCase(),
+          r.parameter || '—',
+          String(r.current ?? '—'),
+          String(r.recommended ?? r.action ?? '—'),
+          r.reason || '—',
+        ]),
+        theme: 'striped',
+        headStyles: { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 8 },
+        bodyStyles: { fontSize: 8 },
+        columnStyles: { 4: { cellWidth: 70 } },
+        didParseCell: (hookData) => {
+          if (hookData.section === 'body' && hookData.column.index === 0) {
+            const val = hookData.cell.raw
+            if (val === 'HIGH')   hookData.cell.styles.textColor = [218, 54, 51]
+            if (val === 'MEDIUM') hookData.cell.styles.textColor = [210, 153, 34]
+          }
+        },
+        margin: { left: 14, right: 14 },
+      })
+    }
+
+    // Footer
+    const pages = doc.internal.getNumberOfPages()
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i)
+      doc.setFontSize(8)
+      doc.setTextColor(139, 148, 158)
+      doc.text('STOX Algorithmic Trading — Confidential', 14, 290)
+      doc.text(`Page ${i} of ${pages}`, W - 14, 290, { align: 'right' })
+    }
+
+    doc.save(`stox-strategy-review-${new Date().toISOString().slice(0, 10)}.pdf`)
+  })
+
+  return (
+    <div className="reports-tab">
+      <div className="reports-header">
+        <h2>Reports</h2>
+        <div className="reports-period">
+          <span className="reports-period-label">Period:</span>
+          {REPORT_PERIODS.map(p => (
+            <button
+              key={p.days}
+              className={`btn ${period === p.days ? 'btn-primary' : 'btn-ghost'} reports-period-btn`}
+              onClick={() => setPeriod(p.days)}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="reports-grid">
+        <ReportCard
+          title="Performance Summary"
+          description="Account overview, realised P&L, win rate, profit factor, Sharpe, Sortino, Calmar, max drawdown, VaR, and top-performing symbols."
+          onDownload={downloadPerformance}
+          loading={loading.perf}
+        />
+        <ReportCard
+          title="Trade History"
+          description="Complete log of all closed trades with entry/exit prices, P&L, percentage return, exit reason, and dates. Landscape A4 format."
+          onDownload={downloadTradeHistory}
+          loading={loading.trades}
+        />
+        <ReportCard
+          title="Strategy Review"
+          description={`Recent vs all-time stats, per-symbol breakdown, and parameter recommendations based on the last ${period} days of live trading.`}
+          onDownload={downloadStrategyReview}
+          loading={loading.review}
+        />
+      </div>
+
+      <div className="reports-note">
+        PDFs are generated client-side and downloaded immediately. No data leaves your browser.
+      </div>
+    </div>
+  )
+}
+
 export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
   const { account, positions, trades, summary, equityCurve, botStatus } = data
   const [toggleLoading, setToggleLoading] = useState(false)
   const [botMsg, setBotMsg] = useState(null)
+  const [activeTab, setActiveTab] = useState('overview')
 
   const handleToggle = async (dryRun = false) => {
     setToggleLoading(true)
@@ -1083,19 +1510,41 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
         </div>
       )}
 
+      <div className="tab-bar">
+        <button
+          className={`tab-btn ${activeTab === 'overview' ? 'tab-btn-active' : ''}`}
+          onClick={() => setActiveTab('overview')}
+        >
+          Overview
+        </button>
+        <button
+          className={`tab-btn ${activeTab === 'reports' ? 'tab-btn-active' : ''}`}
+          onClick={() => setActiveTab('reports')}
+        >
+          Reports
+        </button>
+      </div>
+
       <main className="main">
-        <StatsRow account={account} summary={summary} posCount={Object.keys(positions).length} />
-        <MarketPanel />
-        <IPOApprovalPanel />
-        <PairsPanel />
-        <FeaturesPanel />
-        <AnalyticsPanel />
-        <EquityChart snapshots={equityCurve} />
-        <div className="tables-grid">
-          <PositionsTable positions={positions} />
-          <TradesTable trades={trades.slice(0, 20)} />
-        </div>
-        <LogViewer />
+        {activeTab === 'overview' && (
+          <>
+            <StatsRow account={account} summary={summary} posCount={Object.keys(positions).length} />
+            <MarketPanel />
+            <IPOApprovalPanel />
+            <PairsPanel />
+            <FeaturesPanel />
+            <AnalyticsPanel />
+            <EquityChart snapshots={equityCurve} />
+            <div className="tables-grid">
+              <PositionsTable positions={positions} />
+              <TradesTable trades={trades.slice(0, 20)} />
+            </div>
+            <LogViewer />
+          </>
+        )}
+        {activeTab === 'reports' && (
+          <ReportsTab data={data} />
+        )}
       </main>
 
       <footer className="footer">

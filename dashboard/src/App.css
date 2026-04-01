@@ -845,3 +845,122 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
 .snap-dot   { color: var(--blue); font-size: 8px; }
 .snap-price { font-family: var(--mono); color: var(--text); }
 .snap-chg   { font-family: var(--mono); font-weight: 600; min-width: 56px; text-align: right; }
+
+/* ------------------------------------------------------------------ Tab bar */
+
+.tab-bar {
+  display: flex;
+  gap: 2px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 10px 16px;
+  transition: color 0.15s, border-color 0.15s;
+  margin-bottom: -1px;
+}
+
+.tab-btn:hover { color: var(--text); }
+
+.tab-btn-active {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+}
+
+/* ------------------------------------------------------------------ Reports tab */
+
+.reports-tab {
+  padding: 24px;
+  max-width: 900px;
+}
+
+.reports-header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+}
+
+.reports-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+.reports-period {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.reports-period-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.reports-period-btn {
+  padding: 4px 12px;
+  font-size: 12px;
+}
+
+.reports-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.report-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.report-card-body {
+  flex: 1;
+}
+
+.report-card-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.report-card-desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.report-dl-btn {
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 140px;
+}
+
+.reports-note {
+  margin-top: 24px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 10px 14px;
+  background: rgba(88, 166, 255, 0.05);
+  border: 1px solid rgba(88, 166, 255, 0.15);
+  border-radius: 6px;
+}
