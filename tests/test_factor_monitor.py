@@ -15,14 +15,14 @@ import os
 import sys
 import types
 from datetime import date
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 import pandas as pd
 import pytest
 
 # ---------------------------------------------------------------------------
-# Stub `ta` before any stox import
+# Stub `ta` and `yfinance` before any stox import
 # ---------------------------------------------------------------------------
 
 def _stub_ta():
