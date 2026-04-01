@@ -213,7 +213,31 @@ def is_market_open() -> bool:
     return clock.is_open
 
 
-def get_filled_exit_price(symbol: str, after_iso: str) -> tuple[Optional[float], str]:
+def get_portfolio_history(period: str = "1M", timeframe: str = "1D") -> list[dict]:
+    """
+    Return daily equity snapshots from Alpaca's portfolio history API.
+    Each entry: {"timestamp": ISO str, "equity": float}
+    Falls back to [] on error.
+    """
+    try:
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+        from datetime import datetime as _dt
+
+        req = GetPortfolioHistoryRequest(period=period, timeframe=timeframe, extended_hours=False)
+        history = get_trading_client().get_portfolio_history(filter=req)
+        result = []
+        for ts, eq in zip(history.timestamp, history.equity):
+            if eq is None:
+                continue
+            dt = _dt.utcfromtimestamp(ts)
+            result.append({"timestamp": dt.strftime("%Y-%m-%dT%H:%M:%S"), "equity": round(float(eq), 2)})
+        return result
+    except Exception as exc:
+        logger.warning(f"get_portfolio_history failed: {exc}")
+        return []
+
+
+(symbol: str, after_iso: str) -> tuple[Optional[float], str]:
     """
     Scan recent closed orders to find the fill price of a bracket exit
     (take-profit limit-sell or stop-loss stop-sell) for a long position.

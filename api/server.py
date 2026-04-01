@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 from api.bot_manager import bot_manager
 from config import Config
-from trading.alpaca_client import get_account, get_positions, place_bracket_order
+from trading.alpaca_client import get_account, get_positions, place_bracket_order, get_portfolio_history
 from trading.portfolio import Portfolio
 from trading.approval_queue import get_pending, approve, decline, mark_executed
 from utils.logger import get_logger
@@ -107,8 +107,13 @@ def summary(_: str = Depends(verify)) -> dict[str, Any]:
 
 @app.get("/api/equity-curve")
 def equity_curve(_: str = Depends(verify)) -> dict[str, Any]:
-    p = Portfolio()
-    return {"snapshots": [asdict(s) for s in p.snapshots]}
+    # Prefer Alpaca portfolio history (full trail from account creation)
+    snapshots = get_portfolio_history(period="1M", timeframe="1D")
+    if not snapshots:
+        # Fall back to locally recorded snapshots
+        p = Portfolio()
+        snapshots = [asdict(s) for s in p.snapshots]
+    return {"snapshots": snapshots}
 
 
 @app.get("/api/bot/status")
