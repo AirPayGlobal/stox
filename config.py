@@ -65,6 +65,7 @@ class Config:
 
     # Sector rotation
     SECTOR_TOP_N: int = int(os.getenv("SECTOR_TOP_N", "4"))           # only buy in top N sectors by 3-month momentum
+    MAX_POSITIONS_PER_SECTOR: int = int(os.getenv("MAX_POSITIONS_PER_SECTOR", "3"))  # cap per GICS sector to limit concentration
 
     # Kelly Criterion position sizing
     KELLY_MIN_TRADES: int = int(os.getenv("KELLY_MIN_TRADES", "20"))          # min closed trades before Kelly activates

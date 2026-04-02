@@ -285,8 +285,16 @@ class TradingBot:
             trade_count=port_summary.get("total_trades", 0),
         )
 
-        filter_stats = {"sector": 0, "weekly": 0, "sentiment": 0,
+        filter_stats = {"sector": 0, "sector_cap": 0, "weekly": 0, "sentiment": 0,
                         "earnings": 0, "correlation": 0, "ml": 0, "passed": 0}
+
+        # Pre-build sector counts for open positions (used in per-symbol cap check)
+        from analysis.sector_rotation import SYMBOL_TO_SECTOR as _S2S
+        _open_sector_counts: dict[str, int] = {}
+        for sym in open_positions:
+            sec = _S2S.get(sym)
+            if sec:
+                _open_sector_counts[sec] = _open_sector_counts.get(sec, 0) + 1
 
         for symbol, signal, score in buy_candidates:
             if self.risk.max_positions_reached(len(get_positions())):
@@ -296,6 +304,16 @@ class TradingBot:
             if not is_in_top_sectors(symbol):
                 logger.debug(f"Filter SECTOR: {symbol} not in top-{Config.SECTOR_TOP_N} sectors")
                 filter_stats["sector"] += 1
+                continue
+
+            # Sector concentration cap — prevent cluster risk within one GICS sector
+            _sym_sector = _S2S.get(symbol)
+            if _sym_sector and _open_sector_counts.get(_sym_sector, 0) >= Config.MAX_POSITIONS_PER_SECTOR:
+                logger.info(
+                    f"Filter SECTOR_CAP: {symbol} ({_sym_sector}) already at "
+                    f"{_open_sector_counts[_sym_sector]}/{Config.MAX_POSITIONS_PER_SECTOR} positions"
+                )
+                filter_stats["sector_cap"] += 1
                 continue
 
             # Multi-timeframe: weekly chart must confirm the daily BUY
@@ -400,10 +418,10 @@ class TradingBot:
         if buy_candidates:
             logger.info(
                 f"Filter funnel ({len(buy_candidates)} candidates): "
-                f"sector={filter_stats['sector']} weekly={filter_stats['weekly']} "
-                f"sentiment={filter_stats['sentiment']} earnings={filter_stats['earnings']} "
-                f"corr={filter_stats['correlation']} ml={filter_stats['ml']} "
-                f"→ passed={filter_stats['passed']}"
+                f"sector={filter_stats['sector']} sector_cap={filter_stats['sector_cap']} "
+                f"weekly={filter_stats['weekly']} sentiment={filter_stats['sentiment']} "
+                f"earnings={filter_stats['earnings']} corr={filter_stats['correlation']} "
+                f"ml={filter_stats['ml']} → passed={filter_stats['passed']}"
             )
 
         # --- IPO pass: trade mature IPOs with lightweight momentum signal ---
