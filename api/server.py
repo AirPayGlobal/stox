@@ -119,9 +119,11 @@ def account(_: str = Depends(verify)) -> dict[str, Any]:
         cfg = _config()
         base = cfg.BASE_CAPITAL
         equity = data.get("equity", 0)
+        cash_balance = data.get("cash", 0)
         data["base_capital"] = base
-        data["withdrawable_profit"] = max(0.0, equity - base)
-        data["withdrawal_alert"] = data["withdrawable_profit"] >= base * cfg.PROFIT_WITHDRAWAL_ALERT_PCT
+        data["unrealised_growth"] = equity - base           # total equity gain (open + closed), may be negative
+        data["withdrawable_cash"] = max(0.0, cash_balance - base)  # actual idle cash above base — safe to withdraw
+        data["withdrawal_alert"] = data["withdrawable_cash"] >= base * cfg.PROFIT_WITHDRAWAL_ALERT_PCT
         return data
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
