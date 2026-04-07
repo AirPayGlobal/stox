@@ -107,7 +107,14 @@ def market_status(_: str = Depends(verify)) -> dict[str, Any]:
 def account(_: str = Depends(verify)) -> dict[str, Any]:
     try:
         from trading.alpaca_client import get_account
-        return get_account()
+        data = get_account()
+        cfg = _config()
+        base = cfg.BASE_CAPITAL
+        equity = data.get("equity", 0)
+        data["base_capital"] = base
+        data["withdrawable_profit"] = max(0.0, equity - base)
+        data["withdrawal_alert"] = data["withdrawable_profit"] >= base * cfg.PROFIT_WITHDRAWAL_ALERT_PCT
+        return data
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

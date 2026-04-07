@@ -173,7 +173,13 @@ function StatsRow({ account, summary, posCount }) {
       <StatCard
         label="Buying Power"
         value={fmt$(account?.buying_power)}
-        sub={`Day trades: ${account?.daytrade_count ?? 0}`}
+        sub={`Base capital: ${fmt$(account?.base_capital ?? 100000)}`}
+      />
+      <StatCard
+        label="Withdrawable Profit"
+        value={fmt$(account?.withdrawable_profit ?? 0)}
+        sub={account?.withdrawal_alert ? '⚠ Ready to withdraw' : 'Held outside trading pool'}
+        valueClass={(account?.withdrawable_profit ?? 0) > 0 ? 'green' : ''}
       />
       <StatCard
         label="Realised P&L"
@@ -188,7 +194,7 @@ function StatsRow({ account, summary, posCount }) {
       />
       <StatCard
         label="Open Positions"
-        value={`${posCount} / 20`}
+        value={`${posCount} open`}
         sub="Max 20 concurrent"
       />
     </div>

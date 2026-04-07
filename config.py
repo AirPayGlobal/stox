@@ -22,6 +22,14 @@ class Config:
 
     # Portfolio / Risk settings
     INITIAL_CAPITAL: float = float(os.getenv("INITIAL_CAPITAL", "10000"))
+    # BASE_CAPITAL: the amount the bot is authorised to trade with.
+    # Profits above this level accumulate as excess cash and are NOT reinvested.
+    # Set this to your actual deposit amount. Withdraw profits manually from Alpaca
+    # whenever equity - BASE_CAPITAL exceeds your desired withdrawal threshold.
+    BASE_CAPITAL: float = float(os.getenv("BASE_CAPITAL", "100000"))
+    # PROFIT_WITHDRAWAL_ALERT_PCT: log a withdrawal alert when withdrawable
+    # profit exceeds this fraction of BASE_CAPITAL (default 10% = $10K on $100K).
+    PROFIT_WITHDRAWAL_ALERT_PCT: float = float(os.getenv("PROFIT_WITHDRAWAL_ALERT_PCT", "0.10"))
     MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.05"))   # max single position = 5% of equity
     MIN_POSITION_PCT: float = float(os.getenv("MIN_POSITION_PCT", "0.01"))   # don't enter if buying power < 1% of equity
     STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))

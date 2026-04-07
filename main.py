@@ -166,9 +166,11 @@ class TradingBot:
         try:
             account = get_account()
             equity = account["equity"]
-            # Use buying_power (real-time, margin-aware) not cash (T+2 settled).
-            # Cap at equity to avoid using margin — never deploy more than we own.
-            cash = min(account["buying_power"], account["equity"])
+            # Deployable capital = min(buying_power, BASE_CAPITAL).
+            # Caps at BASE_CAPITAL so realised profits above the authorised
+            # trading amount accumulate as excess cash and are never reinvested.
+            # buying_power is used (not cash) to avoid T+2 settlement lag.
+            cash = min(account["buying_power"], Config.BASE_CAPITAL)
         except Exception as exc:
             logger.error(f"Could not fetch account info: {exc}")
             return
@@ -1060,6 +1062,25 @@ class TradingBot:
                 open_positions=len(positions),
             )
             self.portfolio.print_summary()
+
+            # Profit withdrawal alert — notify when withdrawable profit
+            # (equity above BASE_CAPITAL) exceeds the configured threshold.
+            withdrawable = equity - Config.BASE_CAPITAL
+            alert_threshold = Config.BASE_CAPITAL * Config.PROFIT_WITHDRAWAL_ALERT_PCT
+            if withdrawable >= alert_threshold:
+                logger.warning(
+                    f"WITHDRAWAL ALERT: equity ${equity:,.2f} is "
+                    f"${withdrawable:,.2f} above BASE_CAPITAL ${Config.BASE_CAPITAL:,.2f} "
+                    f"— consider withdrawing profits from Alpaca. "
+                    f"Bot will not reinvest this amount."
+                )
+            else:
+                logger.info(
+                    f"Capital: base=${Config.BASE_CAPITAL:,.2f} | "
+                    f"equity=${equity:,.2f} | "
+                    f"profit={withdrawable:+,.2f} | "
+                    f"withdrawal threshold=${alert_threshold:,.2f}"
+                )
 
             # Record equity for risk analytics
             record_equity(equity)
