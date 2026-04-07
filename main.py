@@ -205,8 +205,7 @@ class TradingBot:
         # Refresh positions after exits before evaluating capacity
         open_positions = get_positions()
 
-        if self.risk.max_positions_reached(len(open_positions)):
-            logger.info(f"Max positions reached ({len(open_positions)}/{Config.MAX_OPEN_POSITIONS}) — not opening new trades.")
+        if not self.risk.has_buying_power(cash, equity):
             return
 
         # --- Auto-execute expired IPO approvals (user didn't respond in 60 min) ---
@@ -302,7 +301,7 @@ class TradingBot:
                 _open_sector_counts[sec] = _open_sector_counts.get(sec, 0) + 1
 
         for symbol, signal, score in buy_candidates:
-            if self.risk.max_positions_reached(len(get_positions())):
+            if not self.risk.has_buying_power(cash, equity):
                 break
 
             # Sector rotation — skip if sector not in top N by momentum
@@ -448,7 +447,7 @@ class TradingBot:
             )
 
         # --- IPO pass: trade mature IPOs with lightweight momentum signal ---
-        if not self.risk.max_positions_reached(len(get_positions())):
+        if self.risk.has_buying_power(cash, equity):
             self._trade_ipos(open_symbols, equity, cash)
 
         # --- Short selling pass ---
@@ -550,7 +549,7 @@ class TradingBot:
         logger.info(f"Checking {len(tradeable)} mature IPOs: {tradeable}")
 
         for symbol in tradeable:
-            if self.risk.max_positions_reached(len(get_positions())):
+            if not self.risk.has_buying_power(cash, equity):
                 break
             if symbol in open_symbols:
                 continue
@@ -634,7 +633,7 @@ class TradingBot:
             if symbol in open_positions:
                 mark_executed(entry["id"], auto=True)
                 continue
-            if self.risk.max_positions_reached(len(get_positions())):
+            if not self.risk.has_buying_power(cash, equity):
                 break
             self._execute_approved(entry, auto=True)
 

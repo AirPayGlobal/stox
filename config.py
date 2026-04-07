@@ -22,8 +22,8 @@ class Config:
 
     # Portfolio / Risk settings
     INITIAL_CAPITAL: float = float(os.getenv("INITIAL_CAPITAL", "10000"))
-    MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.05"))
-    MAX_OPEN_POSITIONS: int = 20  # hardcoded — env var override removed to prevent stale Railway config
+    MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.05"))   # max single position = 5% of equity
+    MIN_POSITION_PCT: float = float(os.getenv("MIN_POSITION_PCT", "0.01"))   # don't enter if buying power < 1% of equity
     STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))
     TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.30"))   # emergency ceiling only; trailing stop is primary exit
     MAX_DAILY_LOSS_PCT: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.05"))

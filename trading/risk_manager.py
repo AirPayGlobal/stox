@@ -42,12 +42,17 @@ class RiskManager:
             return True
         return False
 
-    def max_positions_reached(self, open_count: int) -> bool:
-        """Return True if the max open position limit is reached."""
-        if open_count >= Config.MAX_OPEN_POSITIONS:
-            logger.debug(f"Max positions reached ({open_count}/{Config.MAX_OPEN_POSITIONS})")
-            return True
-        return False
+    def has_buying_power(self, available: float, equity: float) -> bool:
+        """Return True if there is enough buying power to open at least one more position."""
+        min_required = equity * Config.MIN_POSITION_PCT
+        if available < min_required:
+            logger.info(
+                f"Insufficient buying power for new entries: "
+                f"${available:,.0f} available, need ≥ ${min_required:,.0f} "
+                f"({Config.MIN_POSITION_PCT:.1%} of equity)"
+            )
+            return False
+        return True
 
     # -------------------------------------------------------------- Kelly sizing
 
