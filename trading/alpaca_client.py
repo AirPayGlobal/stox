@@ -292,3 +292,36 @@ def get_filled_exit_price(symbol: str, after_iso: str) -> tuple[Optional[float],
     except Exception as exc:
         logger.debug(f"get_filled_exit_price({symbol}): {exc}")
     return None, ""
+
+
+def get_order_status(order_id: str, fallback_price: float = 0.0) -> tuple[float, bool]:
+    """
+    Return (fill_price, is_filled) for a submitted order.
+
+    Used to confirm VWAP limit order fills before recording portfolio trades.
+    Returns (fill_price, True) if the order is filled, (0.0, False) otherwise.
+    """
+    try:
+        order = get_trading_client().get_order_by_id(order_id)
+        status = str(order.status).lower()
+        if status == "filled":
+            price = float(order.filled_avg_price or fallback_price)
+            return price, True
+        return 0.0, False
+    except Exception as exc:
+        logger.debug(f"get_order_status({order_id}): {exc}")
+        return 0.0, False
+
+
+def is_order_done(order_id: str) -> bool:
+    """
+    Return True if the order is in a terminal non-filled state
+    (cancelled, expired, rejected) — meaning it will never fill.
+    """
+    _TERMINAL = {"cancelled", "canceled", "expired", "rejected", "done_for_day"}
+    try:
+        order = get_trading_client().get_order_by_id(order_id)
+        return str(order.status).lower() in _TERMINAL
+    except Exception as exc:
+        logger.debug(f"is_order_done({order_id}): {exc}")
+        return False

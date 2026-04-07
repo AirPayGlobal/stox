@@ -131,6 +131,7 @@ class TradingBot:
         self.partial_exits = PartialExitManager()        # Upgrade 2
         self.vwap_executor = VWAPExecutor()              # Upgrade 6
         self._last_ml_retrain_month: int = -1            # Upgrade 3: monthly retrain
+        self._pending_orders: dict = {}                  # VWAP orders awaiting fill confirmation
 
         mode = "DRY RUN" if dry_run else Config.ALPACA_MODE.upper()
         logger.info(f"Bot initialised | mode={mode} | strategy={self.strategy.name}")
@@ -175,6 +176,8 @@ class TradingBot:
         open_positions = get_positions()
         pending_symbols = get_pending_symbols()
         open_symbols = set(open_positions.keys()) | pending_symbols
+        # Reconcile any VWAP limit orders that were pending from previous scans
+        self._reconcile_pending_orders()
         self._check_exits(open_positions, equity)
 
         # --- ENTRY FILTERS — early-returns here do NOT skip exits (done above) ---
@@ -395,22 +398,40 @@ class TradingBot:
             )
 
             if not self.dry_run:
-                # Upgrade 6: VWAP-referenced limit order for better fills
+                # Upgrade 6: VWAP-referenced limit order for better fills.
+                # Only record the trade once the order confirms as filled (not on submit)
+                # so that expired/cancelled limit orders don't create phantom open trades.
                 vwap = calculate_vwap(df, lookback_bars=20)
                 order_id = self.vwap_executor.place_entry_order(
                     symbol=symbol, qty=shares, vwap=vwap
                 )
                 if order_id:
-                    self.portfolio.open_trade(
-                        symbol=symbol,
-                        shares=shares,
-                        entry_price=price,
-                        stop_loss=stop_loss,
-                        take_profit=take_profit,
-                        order_id=order_id,
-                    )
-                    self.risk.record_trade()
-                    cash -= cost
+                    # Check fill status — limit orders may not fill immediately
+                    from trading.alpaca_client import get_order_status
+                    fill_price, is_filled = get_order_status(order_id, price)
+                    if is_filled:
+                        self.portfolio.open_trade(
+                            symbol=symbol,
+                            shares=shares,
+                            entry_price=fill_price,
+                            stop_loss=stop_loss,
+                            take_profit=take_profit,
+                            order_id=order_id,
+                        )
+                        self.risk.record_trade()
+                        cash -= fill_price * shares
+                    else:
+                        # Order submitted but not yet filled — will be tracked by VWAP executor
+                        # and reconciled next scan via _reconcile_pending_orders()
+                        self._pending_orders[order_id] = {
+                            "symbol": symbol, "shares": shares,
+                            "stop_loss": stop_loss, "take_profit": take_profit,
+                            "estimated_cost": cost,
+                        }
+                        logger.info(
+                            f"VWAP order submitted but pending fill: {symbol} "
+                            f"{shares} shares | order={order_id}"
+                        )
             else:
                 logger.info(f"[DRY RUN] Would place VWAP limit: BUY {shares} {symbol} @ ${price:.2f}")
 
@@ -884,6 +905,22 @@ class TradingBot:
                                 logger.info(f"[DRY RUN] Would break-even close {symbol}")
                             continue
 
+                        # Hard take-profit: restored after removing bracket orders (Upgrade 6).
+                        # Close the full position when price reaches the stored 3:1 TP level.
+                        tp_price = trade.take_profit
+                        if tp_price and tp_price > 0 and current_price >= tp_price:
+                            logger.info(
+                                f"Take profit: {symbol} price=${current_price:.2f} "
+                                f">= TP=${tp_price:.2f} "
+                                f"(+{(current_price / trade.entry_price - 1):.1%})"
+                            )
+                            if not self.dry_run:
+                                if close_position(symbol):
+                                    self.portfolio.close_trade(symbol, current_price, status="TOOK_PROFIT")
+                            else:
+                                logger.info(f"[DRY RUN] Would take-profit close {symbol}")
+                            continue
+
                         # Tiered trailing stop: give bigger winners more room to breathe
                         gain_pct = (hwm / trade.entry_price) - 1
                         if gain_pct >= Config.TRAILING_HIGH_TRIGGER:
@@ -926,6 +963,46 @@ class TradingBot:
         # get_positions() but our local portfolio still shows it as OPEN.
         # Detect these and close them in the local record.
         self._reconcile_broker_exits(open_positions)
+
+    def _reconcile_pending_orders(self) -> None:
+        """
+        Check status of previously submitted VWAP limit orders that hadn't
+        filled yet. Record them in the portfolio once confirmed filled;
+        remove them if cancelled/expired.
+        """
+        if not self._pending_orders:
+            return
+        from trading.alpaca_client import get_order_status
+        resolved = []
+        for order_id, meta in self._pending_orders.items():
+            symbol = meta["symbol"]
+            fill_price, is_filled = get_order_status(order_id, meta.get("estimated_price", 0))
+            if is_filled and fill_price:
+                self.portfolio.open_trade(
+                    symbol=symbol,
+                    shares=meta["shares"],
+                    entry_price=fill_price,
+                    stop_loss=meta["stop_loss"],
+                    take_profit=meta["take_profit"],
+                    order_id=order_id,
+                )
+                self.risk.record_trade()
+                logger.info(
+                    f"Pending VWAP order filled: {symbol} {meta['shares']} shares "
+                    f"@ ${fill_price:.2f} | order={order_id}"
+                )
+                resolved.append(order_id)
+            else:
+                # Check if order is cancelled/expired (not just pending)
+                from trading.alpaca_client import is_order_done
+                if is_order_done(order_id):
+                    logger.info(
+                        f"VWAP order expired/cancelled without fill: "
+                        f"{symbol} | order={order_id}"
+                    )
+                    resolved.append(order_id)
+        for oid in resolved:
+            self._pending_orders.pop(oid, None)
 
     def _reconcile_broker_exits(self, open_positions: dict) -> None:
         """
