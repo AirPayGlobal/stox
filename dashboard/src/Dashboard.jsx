@@ -9,13 +9,7 @@ import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, decline
 
 function fmt$(n) {
   if (n == null) return '—'
-  const abs = Math.abs(n)
-  const s = abs >= 1_000_000
-    ? `$${(abs / 1_000_000).toFixed(2)}M`
-    : abs >= 1_000
-    ? `$${(abs / 1_000).toFixed(2)}K`
-    : `$${abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-  return n < 0 ? `-${s}` : s
+  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 function fmtPct(n) {
