@@ -19,7 +19,14 @@ from utils.logger import get_logger
 
 logger = get_logger(__name__)
 
-_STORE = Path(__file__).parent.parent / "data" / "pairs_positions.json"
+import os
+
+_STORE = Path(
+    os.environ.get(
+        "PAIRS_FILE",
+        str(Path(__file__).parent.parent / "data" / "pairs_positions.json"),
+    )
+)
 
 
 # ---------------------------------------------------------------------------
