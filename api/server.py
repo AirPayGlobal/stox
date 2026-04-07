@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import base64
 import os
+import json
 import secrets
 from dataclasses import asdict
 from pathlib import Path
@@ -59,6 +60,13 @@ def _logger():
 async def _auto_start_bot() -> None:
     import asyncio
     await asyncio.sleep(1)
+    # Restore persisted settings before starting the bot
+    saved = _load_settings()
+    if saved:
+        cfg = _config()
+        for k, v in saved.items():
+            if hasattr(cfg, k):
+                setattr(cfg, k, v)
     _bot_manager().start(dry_run=False)
 
 _DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
@@ -117,6 +125,64 @@ def account(_: str = Depends(verify)) -> dict[str, Any]:
         return data
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+_SETTINGS_FILE = Path(os.environ.get("SETTINGS_FILE", "/data/settings.json"))
+_EDITABLE_SETTINGS = {"BASE_CAPITAL", "PROFIT_WITHDRAWAL_ALERT_PCT"}
+
+
+def _load_settings() -> dict:
+    try:
+        if _SETTINGS_FILE.exists():
+            return json.loads(_SETTINGS_FILE.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_settings(patch: dict) -> dict:
+    current = _load_settings()
+    current.update(patch)
+    _SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _SETTINGS_FILE.write_text(json.dumps(current, indent=2))
+    return current
+
+
+@app.get("/api/settings")
+def get_settings(_: str = Depends(verify)) -> dict:
+    cfg = _config()
+    return {
+        "BASE_CAPITAL": _load_settings().get("BASE_CAPITAL", cfg.BASE_CAPITAL),
+        "PROFIT_WITHDRAWAL_ALERT_PCT": _load_settings().get(
+            "PROFIT_WITHDRAWAL_ALERT_PCT", cfg.PROFIT_WITHDRAWAL_ALERT_PCT
+        ),
+    }
+
+
+@app.patch("/api/settings")
+async def patch_settings(request: Request, _: str = Depends(verify)) -> dict:
+    body = await request.json()
+    patch = {k: v for k, v in body.items() if k in _EDITABLE_SETTINGS}
+    if not patch:
+        raise HTTPException(status_code=400, detail="No valid settings fields provided")
+    # Validate types
+    if "BASE_CAPITAL" in patch:
+        val = float(patch["BASE_CAPITAL"])
+        if val < 1000:
+            raise HTTPException(status_code=400, detail="BASE_CAPITAL must be at least $1,000")
+        patch["BASE_CAPITAL"] = val
+    if "PROFIT_WITHDRAWAL_ALERT_PCT" in patch:
+        val = float(patch["PROFIT_WITHDRAWAL_ALERT_PCT"])
+        if not (0.01 <= val <= 1.0):
+            raise HTTPException(status_code=400, detail="PROFIT_WITHDRAWAL_ALERT_PCT must be between 1% and 100%")
+        patch["PROFIT_WITHDRAWAL_ALERT_PCT"] = val
+    saved = _save_settings(patch)
+    # Apply to live config so the running bot picks it up immediately
+    cfg = _config()
+    for k, v in patch.items():
+        if hasattr(cfg, k):
+            setattr(cfg, k, v)
+    return saved
 
 
 @app.get("/api/positions")

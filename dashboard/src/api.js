@@ -78,3 +78,11 @@ export async function fetchMarketStatus() {
 export async function fetchReview(days = 30) {
   return client.get(`/api/review?days=${days}`)
 }
+
+export async function fetchSettings() {
+  return client.get('/api/settings')
+}
+
+export async function saveSettings(patch) {
+  return client.patch('/api/settings', patch)
+}

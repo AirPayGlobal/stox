@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket, fetchReview, fetchMarketStatus } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket, fetchReview, fetchMarketStatus, fetchSettings, saveSettings } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -1064,6 +1064,135 @@ function LogViewer() {
 }
 
 
+// ------------------------------------------------------------------ Settings Tab
+
+function SettingsTab({ account }) {
+  const [values, setValues] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState(null)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    fetchSettings()
+      .then(r => setValues(r.data))
+      .catch(() => setError('Could not load settings'))
+  }, [])
+
+  const handleChange = (key, raw) => {
+    setValues(v => ({ ...v, [key]: raw }))
+    setMsg(null)
+    setError(null)
+  }
+
+  const handleSave = async () => {
+    setSaving(true)
+    setMsg(null)
+    setError(null)
+    try {
+      const patch = {
+        BASE_CAPITAL: parseFloat(values.BASE_CAPITAL),
+        PROFIT_WITHDRAWAL_ALERT_PCT: parseFloat(values.PROFIT_WITHDRAWAL_ALERT_PCT),
+      }
+      await saveSettings(patch)
+      setMsg('Settings saved — applied immediately to the running bot.')
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const withdrawable = account?.withdrawable_profit ?? 0
+  const alertPct = values ? parseFloat(values.PROFIT_WITHDRAWAL_ALERT_PCT) * 100 : 10
+  const alertAt = values ? parseFloat(values.BASE_CAPITAL) * parseFloat(values.PROFIT_WITHDRAWAL_ALERT_PCT) : 0
+
+  return (
+    <div className="settings-tab">
+      <h2 className="settings-header">Capital Settings</h2>
+      <p className="settings-desc">
+        The bot only deploys up to <strong>Base Capital</strong>. Any equity above that
+        accumulates as cash and is never reinvested — withdraw it from Alpaca whenever you like.
+      </p>
+
+      {error && <div className="settings-error">{error}</div>}
+      {msg   && <div className="settings-success">{msg}</div>}
+
+      {values ? (
+        <div className="settings-form">
+          <div className="settings-field">
+            <label className="settings-label">
+              Base Capital
+              <span className="settings-hint">Amount the bot is authorised to trade with</span>
+            </label>
+            <div className="settings-input-wrap">
+              <span className="settings-prefix">$</span>
+              <input
+                type="number"
+                className="settings-input"
+                value={values.BASE_CAPITAL}
+                min="1000"
+                step="1000"
+                onChange={e => handleChange('BASE_CAPITAL', e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="settings-field">
+            <label className="settings-label">
+              Withdrawal Alert Threshold
+              <span className="settings-hint">
+                Alert when withdrawable profit exceeds this % of base capital
+                {values ? ` (= ${fmt$(alertAt)})` : ''}
+              </span>
+            </label>
+            <div className="settings-input-wrap">
+              <input
+                type="number"
+                className="settings-input"
+                value={(parseFloat(values.PROFIT_WITHDRAWAL_ALERT_PCT) * 100).toFixed(1)}
+                min="1"
+                max="100"
+                step="1"
+                onChange={e => handleChange('PROFIT_WITHDRAWAL_ALERT_PCT', (parseFloat(e.target.value) / 100).toString())}
+              />
+              <span className="settings-suffix">%</span>
+            </div>
+          </div>
+
+          <div className="settings-summary">
+            <div className="settings-summary-row">
+              <span>Current equity</span>
+              <span>{fmt$(account?.equity)}</span>
+            </div>
+            <div className="settings-summary-row">
+              <span>Base capital</span>
+              <span>{fmt$(parseFloat(values.BASE_CAPITAL))}</span>
+            </div>
+            <div className={`settings-summary-row ${withdrawable > 0 ? 'green' : ''}`}>
+              <span>Withdrawable profit</span>
+              <strong>{fmt$(withdrawable)}</strong>
+            </div>
+            <div className="settings-summary-row">
+              <span>Alert fires at</span>
+              <span>{fmt$(alertAt)} profit</span>
+            </div>
+          </div>
+
+          <button
+            className="settings-save-btn"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? 'Saving…' : 'Save Settings'}
+          </button>
+        </div>
+      ) : (
+        !error && <p className="settings-loading">Loading…</p>
+      )}
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ Reports Tab
 
 const REPORT_PERIODS = [
@@ -1796,6 +1925,12 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
         >
           Reports
         </button>
+        <button
+          className={`tab-btn ${activeTab === 'settings' ? 'tab-btn-active' : ''}`}
+          onClick={() => setActiveTab('settings')}
+        >
+          Settings
+        </button>
       </div>
 
       <main className="main">
@@ -1817,6 +1952,9 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
         )}
         {activeTab === 'reports' && (
           <ReportsTab data={data} />
+        )}
+        {activeTab === 'settings' && (
+          <SettingsTab account={account} />
         )}
       </main>
 
