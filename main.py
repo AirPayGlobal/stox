@@ -166,7 +166,9 @@ class TradingBot:
         try:
             account = get_account()
             equity = account["equity"]
-            cash = account["cash"]
+            # Use buying_power (real-time, margin-aware) not cash (T+2 settled).
+            # Cap at equity to avoid using margin — never deploy more than we own.
+            cash = min(account["buying_power"], account["equity"])
         except Exception as exc:
             logger.error(f"Could not fetch account info: {exc}")
             return
