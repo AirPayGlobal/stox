@@ -426,7 +426,7 @@ class TradingBot:
                         self._pending_orders[order_id] = {
                             "symbol": symbol, "shares": shares,
                             "stop_loss": stop_loss, "take_profit": take_profit,
-                            "estimated_cost": cost,
+                            "estimated_price": price,
                         }
                         logger.info(
                             f"VWAP order submitted but pending fill: {symbol} "
