@@ -139,63 +139,57 @@ _CACHE_TTL = 3600  # refresh once per hour
 _MIN_SECTORS_REQUIRED = 6  # fail-open if yfinance returns fewer than this
 
 
+def _fetch_etf_return(etf: str) -> Optional[float]:
+    """Fetch 3-month return for a single ETF. Returns None on failure."""
+    try:
+        import yfinance as yf
+        series = yf.Ticker(etf).history(period="4mo", interval="1d", auto_adjust=True)["Close"].dropna()
+        if len(series) < 20:
+            return None
+        lookback = min(63, len(series) - 1)
+        return float((series.iloc[-1] / series.iloc[-lookback]) - 1)
+    except Exception:
+        return None
+
+
 def get_sector_rankings() -> list[tuple[str, float, int]]:
     """
     Fetch 3-month returns for all 11 sector ETFs and rank them.
 
-    Returns list of (etf_symbol, 3m_return, rank) sorted best → worst.
-    Cached for 1 hour. Returns [] (fail-open, no filter) if yfinance
-    returns fewer than _MIN_SECTORS_REQUIRED ETFs with valid data.
+    Fetches each ETF individually so a single yfinance failure doesn't
+    wipe out the whole batch. Returns [] (fail-open, no filter) if fewer
+    than _MIN_SECTORS_REQUIRED ETFs return valid data.
+    Cached for 1 hour.
     """
     global _cache
     if _cache and (time.time() - _cache[1]) < _CACHE_TTL:
         return _cache[0]
 
-    try:
-        import yfinance as yf
-        etfs = list(SECTOR_ETF_NAMES.keys())
+    etfs = list(SECTOR_ETF_NAMES.keys())
+    returns: dict[str, float] = {}
 
-        tickers = yf.download(
-            etfs,
-            period="4mo",      # 4 months to get clean 3-month window
-            interval="1d",
-            progress=False,
-            auto_adjust=True,
-        )["Close"]
+    for etf in etfs:
+        ret = _fetch_etf_return(etf)
+        if ret is not None:
+            returns[etf] = ret
 
-        returns = {}
-        for etf in etfs:
-            if etf not in tickers.columns:
-                continue
-            series = tickers[etf].dropna()
-            if len(series) < 20:
-                continue
-            # 3-month return: last close vs close 63 trading days ago
-            lookback = min(63, len(series) - 1)
-            ret = (series.iloc[-1] / series.iloc[-lookback]) - 1
-            returns[etf] = float(ret)
-
-        if len(returns) < _MIN_SECTORS_REQUIRED:
-            logger.warning(
-                f"Sector rankings: only {len(returns)}/{len(etfs)} ETFs returned "
-                f"(need {_MIN_SECTORS_REQUIRED}) — sector filter disabled this cycle"
-            )
-            return []
-
-        ranked = sorted(returns.items(), key=lambda x: x[1], reverse=True)
-        result = [(etf, ret, rank + 1) for rank, (etf, ret) in enumerate(ranked)]
-
-        logger.info(
-            f"Sector rankings ({len(result)} sectors, 3-month momentum): "
-            + " | ".join(f"{e}={r:+.1%}" for e, r, _ in result[:5])
+    if len(returns) < _MIN_SECTORS_REQUIRED:
+        logger.warning(
+            f"Sector rankings: only {len(returns)}/{len(etfs)} ETFs returned "
+            f"(need {_MIN_SECTORS_REQUIRED}) — sector filter disabled this cycle"
         )
-
-        _cache = (result, time.time())
-        return result
-
-    except Exception as exc:
-        logger.warning(f"Sector ranking failed: {exc} — no sector filter applied")
         return []
+
+    ranked = sorted(returns.items(), key=lambda x: x[1], reverse=True)
+    result = [(etf, ret, rank + 1) for rank, (etf, ret) in enumerate(ranked)]
+
+    logger.info(
+        f"Sector rankings ({len(result)} sectors, 3-month momentum): "
+        + " | ".join(f"{e}={r:+.1%}" for e, r, _ in result[:5])
+    )
+
+    _cache = (result, time.time())
+    return result
 
 
 def get_top_sector_etfs(top_n: int = None) -> set[str]:
