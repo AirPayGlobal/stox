@@ -51,6 +51,15 @@ def _logger():
     from utils.logger import get_logger as _gl
     return _gl(__name__)
 
+_portfolio_cache: dict = {"instance": None}
+
+def _portfolio():
+    """Return a cached Portfolio instance, reloading from disk only once per process."""
+    if _portfolio_cache["instance"] is None:
+        from trading.portfolio import Portfolio
+        _portfolio_cache["instance"] = Portfolio()
+    return _portfolio_cache["instance"]
+
 
 # ------------------------------------------------------------------ Auto-start
 # Deferred to startup event so /health is responsive before the bot's
@@ -199,14 +208,14 @@ def positions(_: str = Depends(verify)) -> dict[str, Any]:
 @app.get("/api/trades")
 def trades(_: str = Depends(verify)) -> dict[str, Any]:
     from trading.portfolio import Portfolio
-    p = Portfolio()
+    p = _portfolio()
     return {"trades": [asdict(t) for t in reversed(p.trades)]}
 
 
 @app.get("/api/summary")
 def summary(_: str = Depends(verify)) -> dict[str, Any]:
     from trading.portfolio import Portfolio
-    return Portfolio().summary()
+    return _portfolio().summary()
 
 
 @app.get("/api/equity-curve")
@@ -217,7 +226,7 @@ def equity_curve(_: str = Depends(verify)) -> dict[str, Any]:
     snapshots = get_portfolio_history(period="1M", timeframe="1D")
     if not snapshots:
         # Fall back to locally recorded snapshots
-        p = Portfolio()
+        p = _portfolio()
         snapshots = [asdict(s) for s in p.snapshots]
     return {"snapshots": snapshots}
 
@@ -281,7 +290,7 @@ def approve_trade(approval_id: str, _: str = Depends(verify)) -> dict[str, Any]:
             take_profit_price=entry["take_profit"],
         )
         if order_id:
-            Portfolio().open_trade(
+            _portfolio().open_trade(
                 symbol=entry["symbol"],
                 shares=entry["shares"],
                 entry_price=entry["price"],
@@ -382,7 +391,7 @@ def market_data(_: str = Depends(verify)) -> dict[str, Any]:
     try:
         from trading.portfolio import Portfolio
         from config import Config
-        p = Portfolio()
+        p = _portfolio()
         open_syms = [t.symbol for t in p.trades if t.status == "OPEN"]
         snap_syms = list(dict.fromkeys(open_syms + Config.WATCHLIST[:10]))
         snap_raw = yf.download(
@@ -431,7 +440,7 @@ def market_data(_: str = Depends(verify)) -> dict[str, Any]:
             "short_enabled": Config.SHORT_SELLING_ENABLED,
             "weekly_req":    Config.WEEKLY_CONFIRM_REQUIRED,
             "sector_top_n":  Config.SECTOR_TOP_N,
-            "kelly_active":  Portfolio().summary().get("total_trades", 0) >= Config.KELLY_MIN_TRADES,
+            "kelly_active":  _portfolio().summary().get("total_trades", 0) >= Config.KELLY_MIN_TRADES,
         }
     except Exception:
         pass
@@ -454,7 +463,7 @@ def analytics(_: str = Depends(verify)) -> dict[str, Any]:
     """Portfolio risk metrics: Sharpe, Sortino, drawdown, VaR, equity curve."""
     from analysis.risk_analytics import compute_analytics
     from trading.portfolio import Portfolio
-    p = Portfolio()
+    p = _portfolio()
     return compute_analytics(portfolio=p)
 
 
@@ -473,7 +482,7 @@ def features(_: str = Depends(verify)) -> dict[str, Any]:
     """
     from config import Config
     from trading.portfolio import Portfolio
-    p = Portfolio()
+    p = _portfolio()
     summary = p.summary()
     closed_count = summary.get("total_trades", 0)
 

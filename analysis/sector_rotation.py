@@ -136,12 +136,16 @@ _cache: Optional[tuple[list, float]] = None
 _CACHE_TTL = 3600  # refresh once per hour
 
 
+_MIN_SECTORS_REQUIRED = 6  # fail-open if yfinance returns fewer than this
+
+
 def get_sector_rankings() -> list[tuple[str, float, int]]:
     """
     Fetch 3-month returns for all 11 sector ETFs and rank them.
 
     Returns list of (etf_symbol, 3m_return, rank) sorted best → worst.
-    Cached for 1 hour.
+    Cached for 1 hour. Returns [] (fail-open, no filter) if yfinance
+    returns fewer than _MIN_SECTORS_REQUIRED ETFs with valid data.
     """
     global _cache
     if _cache and (time.time() - _cache[1]) < _CACHE_TTL:
@@ -171,11 +175,18 @@ def get_sector_rankings() -> list[tuple[str, float, int]]:
             ret = (series.iloc[-1] / series.iloc[-lookback]) - 1
             returns[etf] = float(ret)
 
+        if len(returns) < _MIN_SECTORS_REQUIRED:
+            logger.warning(
+                f"Sector rankings: only {len(returns)}/{len(etfs)} ETFs returned "
+                f"(need {_MIN_SECTORS_REQUIRED}) — sector filter disabled this cycle"
+            )
+            return []
+
         ranked = sorted(returns.items(), key=lambda x: x[1], reverse=True)
         result = [(etf, ret, rank + 1) for rank, (etf, ret) in enumerate(ranked)]
 
         logger.info(
-            "Sector rankings (3-month momentum): "
+            f"Sector rankings ({len(result)} sectors, 3-month momentum): "
             + " | ".join(f"{e}={r:+.1%}" for e, r, _ in result[:5])
         )
 
