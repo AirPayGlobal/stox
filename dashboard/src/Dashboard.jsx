@@ -176,10 +176,10 @@ function StatsRow({ account, summary, posCount }) {
         sub={`Base capital: ${fmt$(account?.base_capital ?? 100000)}`}
       />
       <StatCard
-        label="Withdrawable Profit"
-        value={fmt$(account?.withdrawable_profit ?? 0)}
+        label="Idle Cash (Above Base)"
+        value={fmt$(account?.withdrawable_cash ?? 0)}
         sub={account?.withdrawal_alert ? '⚠ Ready to withdraw' : 'Held outside trading pool'}
-        valueClass={(account?.withdrawable_profit ?? 0) > 0 ? 'green' : ''}
+        valueClass={(account?.withdrawable_cash ?? 0) > 0 ? 'green' : ''}
       />
       <StatCard
         label="Realised P&L"
@@ -1102,7 +1102,7 @@ function SettingsTab({ account }) {
     }
   }
 
-  const withdrawable = account?.withdrawable_profit ?? 0
+  const withdrawable = account?.withdrawable_cash ?? 0
   const alertPct = values ? parseFloat(values.PROFIT_WITHDRAWAL_ALERT_PCT) * 100 : 10
   const alertAt = values ? parseFloat(values.BASE_CAPITAL) * parseFloat(values.PROFIT_WITHDRAWAL_ALERT_PCT) : 0
 
