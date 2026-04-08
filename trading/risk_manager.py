@@ -154,6 +154,40 @@ class RiskManager:
         )
         return shares, stop_loss, take_profit
 
+    def volatility_target_multiplier(self, df: "pd.DataFrame") -> float:
+        """
+        Returns a multiplier in (0, 1] that scales a Kelly-sized position
+        down when the stock's realised vol exceeds the per-position vol budget.
+
+        Formula:
+            realized_vol  = annualised std of last 20 daily returns
+            target_vol    = Config.VOL_TARGET_PER_POSITION (default 1%)
+            multiplier    = min(1.0, target_vol / realized_vol)
+
+        A multiplier of 1.0 means no scaling (vol is at or below target).
+        A multiplier of 0.5 means the position is halved (vol is 2× target).
+        """
+        import pandas as pd
+        import numpy as np
+        try:
+            if df is None or len(df) < 21:
+                return 1.0
+            returns = df["close"].pct_change().dropna().tail(20)
+            if len(returns) < 10:
+                return 1.0
+            realized_vol = float(returns.std() * np.sqrt(252))
+            if realized_vol <= 0:
+                return 1.0
+            multiplier = min(1.0, Config.VOL_TARGET_PER_POSITION / realized_vol)
+            logger.debug(
+                f"Vol target: realized={realized_vol:.1%} "
+                f"target={Config.VOL_TARGET_PER_POSITION:.1%} "
+                f"→ multiplier={multiplier:.2f}"
+            )
+            return multiplier
+        except Exception:
+            return 1.0
+
     def record_trade(self) -> None:
         self._trades_today += 1
 

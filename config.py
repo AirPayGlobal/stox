@@ -79,6 +79,10 @@ class Config:
     KELLY_MIN_TRADES: int = int(os.getenv("KELLY_MIN_TRADES", "20"))          # min closed trades before Kelly activates
     KELLY_MIN_FRACTION: float = float(os.getenv("KELLY_MIN_FRACTION", "0.01")) # floor: never size below 1% of equity
 
+    # Volatility-targeted position sizing
+    VOL_TARGET_ANNUAL: float = float(os.getenv("VOL_TARGET_ANNUAL", "0.15"))          # 15% annualised portfolio vol target
+    VOL_TARGET_PER_POSITION: float = float(os.getenv("VOL_TARGET_PER_POSITION", "0.01"))  # 1% vol budget per position
+
     # Trailing stop — tiered: tighter when gains are small, looser as the trend develops
     TRAILING_STOP_PCT: float      = float(os.getenv("TRAILING_STOP_PCT",      "0.04"))  # gain < MID_TRIGGER:  4% trail
     TRAILING_STOP_MID_PCT: float  = float(os.getenv("TRAILING_STOP_MID_PCT",  "0.05"))  # gain < HIGH_TRIGGER: 5% trail

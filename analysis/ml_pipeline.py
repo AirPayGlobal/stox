@@ -71,10 +71,12 @@ _DYNAMIC_THRESHOLDS: dict[str, float] = {
 
 # Hyperparameter search grid
 _HP_GRID: list[dict] = [
-    {"max_depth": md, "n_estimators": ne, "min_samples_leaf": msl}
-    for md in [3, 5, 8]
-    for ne in [100, 200]
-    for msl in [5, 10, 20]
+    {"n_estimators": n, "max_depth": d, "num_leaves": l, "min_child_samples": m, "learning_rate": lr}
+    for n in [200, 300]
+    for d in [4, 6]
+    for l in [31, 63]
+    for m in [20]
+    for lr in [0.05, 0.1]
 ]
 
 # Extended feature column names (order matters — must stay stable)
@@ -293,7 +295,7 @@ def _tune_hyperparams(X: np.ndarray, y: np.ndarray) -> dict:
     Grid-search over _HP_GRID using TimeSeriesSplit(n_splits=3).
     Returns the best hyperparameter dict and its mean CV AUC.
     """
-    from sklearn.ensemble import RandomForestClassifier
+    from lightgbm import LGBMClassifier
     from sklearn.model_selection import TimeSeriesSplit, cross_val_score
 
     tscv = TimeSeriesSplit(n_splits=3)
@@ -301,10 +303,11 @@ def _tune_hyperparams(X: np.ndarray, y: np.ndarray) -> dict:
     best_auc: float = 0.0
 
     for params in _HP_GRID:
-        clf = RandomForestClassifier(
-            class_weight="balanced",
+        clf = LGBMClassifier(
+            objective="binary",
             random_state=42,
             n_jobs=-1,
+            verbosity=-1,
             **params,
         )
         try:
@@ -330,7 +333,7 @@ def _train_model(
     extra_outcome_rows: Optional[list[dict]] = None,
 ) -> Optional[object]:
     """
-    Train a RandomForest pipeline.  Optionally merges trade-outcome feature
+    Train a LightGBM pipeline.  Optionally merges trade-outcome feature
     rows with the price-pattern rows before fitting.
 
     Returns fitted sklearn Pipeline or None on failure.
@@ -338,7 +341,7 @@ def _train_model(
     if not _check_sklearn():
         return None
 
-    from sklearn.ensemble import RandomForestClassifier
+    from lightgbm import LGBMClassifier
     from sklearn.pipeline import Pipeline
     from sklearn.preprocessing import StandardScaler
 
@@ -390,10 +393,11 @@ def _train_model(
             ("scaler", StandardScaler()),
             (
                 "clf",
-                RandomForestClassifier(
-                    class_weight="balanced",
+                LGBMClassifier(
+                    objective="binary",
                     random_state=42,
                     n_jobs=-1,
+                    verbosity=-1,
                     **best_params,
                 ),
             ),
@@ -459,7 +463,7 @@ def run_walk_forward_cv(symbol: str, df: pd.DataFrame) -> dict:
     if not _check_sklearn():
         return {"windows": [], "mean_auc": 0.0, "std_auc": 0.0, "is_reliable": False}
 
-    from sklearn.ensemble import RandomForestClassifier
+    from lightgbm import LGBMClassifier
     from sklearn.metrics import roc_auc_score
     from sklearn.model_selection import TimeSeriesSplit
     from sklearn.preprocessing import StandardScaler
@@ -510,13 +514,16 @@ def run_walk_forward_cv(symbol: str, df: pd.DataFrame) -> dict:
                 ("scaler", StandardScaler()),
                 (
                     "clf",
-                    RandomForestClassifier(
+                    LGBMClassifier(
+                        objective="binary",
                         n_estimators=100,
                         max_depth=5,
-                        min_samples_leaf=10,
-                        class_weight="balanced",
+                        num_leaves=31,
+                        min_child_samples=20,
+                        learning_rate=0.1,
                         random_state=42,
                         n_jobs=-1,
+                        verbosity=-1,
                     ),
                 ),
             ]

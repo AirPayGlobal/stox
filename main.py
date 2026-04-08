@@ -389,6 +389,12 @@ class TradingBot:
                 shares = max(1, int(shares * sizing_mult))
                 logger.debug(f"Regime {regime.value}: {symbol} shares scaled to {shares}")
 
+            # Volatility targeting — scale down if stock vol exceeds per-position budget
+            vol_mult = self.risk.volatility_target_multiplier(df)
+            if vol_mult < 1.0:
+                shares = max(1, int(shares * vol_mult))
+                logger.debug(f"Vol target: {symbol} shares scaled to {shares} (mult={vol_mult:.2f})")
+
             # Ensure we have enough cash
             cost = price * shares
             if cost > cash * 0.95:

@@ -107,10 +107,28 @@ class VWAPExecutor:
 
     def __init__(self, buffer_pct: float = _MIN_BUFFER_PCT) -> None:
         self._buffer_pct = buffer_pct
+        self.skip_open_minutes: int = 15      # don't submit orders in first N min after open
+        self.urgency_buffer_pct: float = 0.10  # wider buffer (%) when ML urgency is high
         # {order_id: {symbol, qty, side, submitted_at, scan_count, filled,
         #             limit_price, market_close_at_submission}}
         self._orders: dict[str, dict] = {}
         os.makedirs(os.path.dirname(_FILL_STATS_FILE), exist_ok=True)
+
+    # ------------------------------------------------------------------
+    # IS Zero helpers
+    # ------------------------------------------------------------------
+
+    def _is_in_open_window(self) -> bool:
+        """Return True if we are within skip_open_minutes of market open (9:30 ET)."""
+        from datetime import datetime, time, timedelta
+        import pytz
+        et = pytz.timezone("America/New_York")
+        now_et = datetime.now(et).time()
+        market_open = time(9, 30)
+        open_dt = datetime.combine(datetime.now(et).date(), market_open)
+        cutoff_dt = open_dt + timedelta(minutes=self.skip_open_minutes)
+        cutoff = cutoff_dt.time()
+        return market_open <= now_et < cutoff
 
     # ------------------------------------------------------------------
     # Price helpers
@@ -129,14 +147,32 @@ class VWAPExecutor:
     # ------------------------------------------------------------------
 
     def place_entry_order(
-        self, symbol: str, qty: int, vwap: float
+        self, symbol: str, qty: int, vwap: float, ml_prob: float = 0.0
     ) -> Optional[str]:
         """
         Submit a day-limit BUY order at VWAP + buffer.
 
-        Returns the order ID on success, None on failure.
+        Skips submission during the first ``skip_open_minutes`` after market open
+        (IS Zero — avoids high-volatility open window).  When ``ml_prob`` >= 0.70
+        the limit buffer is temporarily widened to ``urgency_buffer_pct`` to
+        increase fill probability for high-confidence signals.
+
+        Returns the order ID on success, None on failure or when skipped.
         """
+        if self._is_in_open_window():
+            logger.info(
+                f"IS Zero: skipping {symbol} entry — within {self.skip_open_minutes}min of open"
+            )
+            return None
+
+        original_buffer = self._buffer_pct
+        if ml_prob >= 0.70:
+            self._buffer_pct = self.urgency_buffer_pct / 100  # 0.10% → 0.001
+            logger.debug(
+                f"IS Zero urgency: {symbol} ml_prob={ml_prob:.2f} → buffer widened to {self._buffer_pct:.4f}"
+            )
         limit_price = self.get_entry_limit_price(vwap)
+        self._buffer_pct = original_buffer  # restore
         return self._submit_limit(symbol, qty, "buy", limit_price, vwap)
 
     def place_exit_order(
@@ -145,8 +181,16 @@ class VWAPExecutor:
         """
         Submit a day-limit SELL order at VWAP - buffer.
 
-        Returns the order ID on success, None on failure.
+        Skips submission during the first ``skip_open_minutes`` after market open
+        (IS Zero — avoids high-volatility open window).
+
+        Returns the order ID on success, None on failure or when skipped.
         """
+        if self._is_in_open_window():
+            logger.info(
+                f"IS Zero: skipping {symbol} exit — within {self.skip_open_minutes}min of open"
+            )
+            return None
         limit_price = self.get_exit_limit_price(vwap)
         return self._submit_limit(symbol, qty, "sell", limit_price, vwap)
 
