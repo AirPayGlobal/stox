@@ -393,6 +393,180 @@ function TradesTable({ trades }) {
   )
 }
 
+// ------------------------------------------------------------------ History tab
+
+function fmtDuration(openedAt, closedAt) {
+  if (!openedAt || !closedAt) return '—'
+  const ms = new Date(closedAt) - new Date(openedAt)
+  if (ms < 0) return '—'
+  const mins = Math.floor(ms / 60000)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ${mins % 60}m`
+  const days = Math.floor(hours / 24)
+  return `${days}d ${hours % 24}h`
+}
+
+const EXIT_LABELS = {
+  CLOSED:        'Closed',
+  STOPPED:       'Stop Loss',
+  TOOK_PROFIT:   'Take Profit',
+  TRAILING_STOP: 'Trailing Stop',
+  BREAK_EVEN:    'Break-Even',
+  SIGNAL_EXIT:   'Signal Exit',
+}
+
+function HistoryTab({ trades }) {
+  const [timeFilter, setTimeFilter] = useState('today')
+  const [exitFilter, setExitFilter] = useState('all')
+
+  const closed = trades.filter(t => t.status !== 'OPEN')
+  const today = new Date().toISOString().slice(0, 10)
+  const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
+
+  const timeFiltered = closed.filter(t => {
+    if (!t.closed_at) return false
+    const d = t.closed_at.slice(0, 10)
+    if (timeFilter === 'today') return d === today
+    if (timeFilter === 'week') return d >= weekAgo
+    return true
+  })
+
+  const filtered = exitFilter === 'all'
+    ? timeFiltered
+    : timeFiltered.filter(t => t.status === exitFilter)
+
+  const todayTrades = closed.filter(t => t.closed_at?.slice(0, 10) === today)
+  const todayPnl = todayTrades.reduce((s, t) => s + (t.pnl || 0), 0)
+  const todayWins = todayTrades.filter(t => (t.pnl || 0) > 0).length
+
+  return (
+    <div className="history-tab">
+      <div className="history-summary">
+        <div className="history-stat">
+          <span className="history-stat-label">Closed Today</span>
+          <span className="history-stat-value">{todayTrades.length}</span>
+        </div>
+        <div className="history-stat">
+          <span className="history-stat-label">Today P&L</span>
+          <span className={`history-stat-value ${todayPnl >= 0 ? 'green' : 'red'}`}>{fmt$(todayPnl)}</span>
+        </div>
+        <div className="history-stat">
+          <span className="history-stat-label">Today Win / Loss</span>
+          <span className="history-stat-value">
+            <span className="green">{todayWins}W</span>
+            {' / '}
+            <span className="red">{todayTrades.length - todayWins}L</span>
+          </span>
+        </div>
+        <div className="history-stat">
+          <span className="history-stat-label">All-Time Closed</span>
+          <span className="history-stat-value">{closed.length}</span>
+        </div>
+      </div>
+
+      <div className="history-filters">
+        <div className="filter-group">
+          {[
+            { key: 'today', label: 'Today' },
+            { key: 'week',  label: 'This Week' },
+            { key: 'all',   label: 'All Time' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              className={`filter-btn ${timeFilter === key ? 'filter-btn-active' : ''}`}
+              onClick={() => setTimeFilter(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="filter-group">
+          {[
+            { key: 'all',           label: 'All Exits' },
+            { key: 'TOOK_PROFIT',   label: 'Take Profit' },
+            { key: 'TRAILING_STOP', label: 'Trailing Stop' },
+            { key: 'STOPPED',       label: 'Stop Loss' },
+            { key: 'BREAK_EVEN',    label: 'Break-Even' },
+            { key: 'SIGNAL_EXIT',   label: 'Signal Exit' },
+            { key: 'CLOSED',        label: 'Manual' },
+          ].map(({ key, label }) => (
+            <button
+              key={key}
+              className={`filter-btn ${exitFilter === key ? 'filter-btn-active' : ''}`}
+              onClick={() => setExitFilter(key)}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="card table-card">
+        <h2>
+          Closed Trades
+          <span className="count-badge">{filtered.length}</span>
+          {timeFilter === 'today' && todayTrades.length === 0 && (
+            <span className="history-none-today">— none closed today</span>
+          )}
+        </h2>
+        {filtered.length === 0 ? (
+          <div className="empty-state">No closed trades match this filter.</div>
+        ) : (
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Side</th>
+                  <th>Shares</th>
+                  <th>Entry</th>
+                  <th>Exit</th>
+                  <th>P&L</th>
+                  <th>P&L %</th>
+                  <th>Exit Reason</th>
+                  <th>Opened</th>
+                  <th>Closed</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((t, i) => (
+                  <tr key={t.order_id || i} className={(t.pnl || 0) >= 0 ? 'row-win' : 'row-loss'}>
+                    <td className="symbol">{t.symbol}</td>
+                    <td>
+                      <span className={`side-badge side-${(t.side || 'BUY').toLowerCase()}`}>
+                        {t.side === 'SHORT' ? 'SHORT' : 'LONG'}
+                      </span>
+                    </td>
+                    <td>{t.shares}</td>
+                    <td>{fmt$(t.entry_price)}</td>
+                    <td>{fmt$(t.exit_price)}</td>
+                    <td>{t.pnl != null ? <PnlCell value={t.pnl} /> : <span className="muted">—</span>}</td>
+                    <td>
+                      {t.pnl_pct != null
+                        ? <span className={t.pnl_pct >= 0 ? 'green' : 'red'}>{fmtPct(t.pnl_pct)}</span>
+                        : <span className="muted">—</span>}
+                    </td>
+                    <td>
+                      <span className={`badge ${STATUS_CLASS[t.status] || ''}`}>
+                        {EXIT_LABELS[t.status] || t.status}
+                      </span>
+                    </td>
+                    <td className="muted">{fmtDateTime(t.opened_at)}</td>
+                    <td className="muted">{fmtDateTime(t.closed_at)}</td>
+                    <td className="muted">{fmtDuration(t.opened_at, t.closed_at)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ------------------------------------------------------------------ Pairs Panel
 
 function PairsPanel() {
@@ -1920,6 +2094,12 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
           Overview
         </button>
         <button
+          className={`tab-btn ${activeTab === 'history' ? 'tab-btn-active' : ''}`}
+          onClick={() => setActiveTab('history')}
+        >
+          History
+        </button>
+        <button
           className={`tab-btn ${activeTab === 'reports' ? 'tab-btn-active' : ''}`}
           onClick={() => setActiveTab('reports')}
         >
@@ -1949,6 +2129,9 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
             </div>
             <LogViewer />
           </>
+        )}
+        {activeTab === 'history' && (
+          <HistoryTab trades={trades} />
         )}
         {activeTab === 'reports' && (
           <ReportsTab data={data} />

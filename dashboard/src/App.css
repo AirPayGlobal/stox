@@ -965,6 +965,105 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
   border-radius: 6px;
 }
 
+/* ------------------------------------------------------------------ History tab */
+
+.history-tab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.history-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 700px) {
+  .history-summary { grid-template-columns: repeat(2, 1fr); }
+}
+
+.history-stat {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.history-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.history-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.history-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.filter-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 5px 12px;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.filter-btn:hover {
+  color: var(--text);
+  border-color: var(--muted);
+}
+
+.filter-btn-active {
+  color: var(--blue);
+  border-color: var(--blue);
+  background: rgba(88, 166, 255, 0.1);
+}
+
+.history-none-today {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+  margin-left: 8px;
+}
+
+.row-win td { background: rgba(63, 185, 80, 0.03); }
+.row-loss td { background: rgba(248, 81, 73, 0.03); }
+
+.side-badge {
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.side-buy,
+.side-long  { background: rgba(63,185,80,0.15);  color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+.side-short,
+.side-sell  { background: rgba(248,81,73,0.15);  color: var(--red);   border: 1px solid rgba(248,81,73,0.3); }
+
 /* ------------------------------------------------------------------ Settings tab */
 
 .settings-tab {
