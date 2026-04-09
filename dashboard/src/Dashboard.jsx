@@ -1995,6 +1995,255 @@ function ReportsTab({ data }) {
     doc.save(`stox-quant-benchmarking-${new Date().toISOString().slice(0, 10)}.pdf`)
   })
 
+  // ---- Platform Overview PDF ----
+  const downloadPlatformOverview = () => buildPdf('overview', async () => {
+    const { jsPDF } = await import('jspdf')
+    const { default: autoTable } = await import('jspdf-autotable')
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
+    const W = doc.internal.pageSize.getWidth()
+    const now = new Date().toLocaleString('en-US', { dateStyle: 'long', timeStyle: 'short' })
+
+    const addHeader = (subtitle) => {
+      doc.setFillColor(13, 17, 23)
+      doc.rect(0, 0, W, 22, 'F')
+      doc.setTextColor(255, 255, 255)
+      doc.setFontSize(16)
+      doc.setFont('helvetica', 'bold')
+      doc.text('STOX', 14, 14)
+      doc.setFontSize(10)
+      doc.setFont('helvetica', 'normal')
+      doc.text(subtitle, 35, 14)
+      doc.setTextColor(139, 148, 158)
+      doc.setFontSize(9)
+      doc.text(`Generated: ${now}`, W - 14, 14, { align: 'right' })
+    }
+
+    const addSection = (title, y) => {
+      doc.setTextColor(13, 17, 23)
+      doc.setFontSize(11)
+      doc.setFont('helvetica', 'bold')
+      doc.text(title, 14, y)
+      doc.setDrawColor(200, 200, 200)
+      doc.line(14, y + 2, W - 14, y + 2)
+      return y + 8
+    }
+
+    const TH = { fillColor: [13, 17, 23], textColor: 255, fontStyle: 'bold', fontSize: 9 }
+    const TB = { fontSize: 9 }
+    const M  = { left: 14, right: 14 }
+    const nextY = () => doc.lastAutoTable.finalY + 10
+
+    // ── Page 1 ──────────────────────────────────────────────────────
+    addHeader('Platform Overview')
+    let y = 32
+
+    doc.setTextColor(50, 50, 50)
+    doc.setFontSize(9)
+    doc.setFont('helvetica', 'normal')
+    const intro = 'STOX is an algorithmic trading bot running on Railway, trading US equities via Alpaca\'s paper trading API. It runs a continuous scan loop during market hours, filtering buy candidates through 8 layers of checks before placing any order. A React dashboard gives live visibility into positions, trades, and risk metrics.'
+    const introLines = doc.splitTextToSize(intro, W - 28)
+    doc.text(introLines, 14, y)
+    y += introLines.length * 5 + 6
+
+    y = addSection('Infrastructure', y)
+    autoTable(doc, { startY: y, head: [['Component', 'Details']], body: [
+      ['Trading Bot',     'Railway (always-on cloud process)'],
+      ['REST API',        'FastAPI, same Railway container'],
+      ['Dashboard',       'React SPA, served from Railway'],
+      ['Data Persistence','logs/portfolio.json on Railway disk'],
+      ['Market Data',     'yfinance + Alpaca'],
+      ['Brokerage',       'Alpaca Paper Trading API'],
+      ['Auto-Deploy',     'Push to claude/stock-trading-bot-QeUGQ → Railway redeploys'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 52 } }, margin: M })
+
+    y = addSection('Capital Management', nextY())
+    autoTable(doc, { startY: y, head: [['Concept', 'Description']], body: [
+      ['BASE_CAPITAL ($100,000)', 'Authorised trading ceiling. Profits above this never get reinvested.'],
+      ['Idle Cash (Above Base)',  'Actual withdrawable surplus shown in the dashboard stat card.'],
+      ['Unrealised Growth',       'Paper gains on open positions — not withdrawable until closed.'],
+      ['Cash Calculation',        'min(buying_power, BASE_CAPITAL) — avoids T+2 settlement lag going negative.'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 62 } }, margin: M })
+
+    y = addSection('Risk Controls', nextY())
+    autoTable(doc, { startY: y, head: [['Control', 'Value']], body: [
+      ['Max position size',           '5% of equity'],
+      ['Max loss per trade',           '3% stop loss'],
+      ['Daily loss circuit-breaker',  '5% of equity — halts all new entries for the day'],
+      ['Max positions per sector',    '3'],
+      ['Correlation limit',            'Pearson r > 0.70 — skips correlated entries'],
+      ['VIX block',                   'VIX > 30 — no new longs'],
+      ['Open 15-min blackout',        '9:30–9:45 ET — skip volatile open window'],
+      ['Earnings blackout',           '2 days before / after earnings date'],
+      ['IPO quarantine',              '5 days before trading new IPOs'],
+      ['Break-even protection',       'Once up 5%, never close below entry price'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 72 } }, margin: M })
+
+    // ── Page 2: Scan Loop ────────────────────────────────────────────
+    doc.addPage()
+    addHeader('Platform Overview — Scan Loop')
+    y = 32
+
+    y = addSection('Step 1 — Exit Management  (always runs first, every scan)', y)
+    autoTable(doc, { startY: y, head: [['Trigger', 'Condition']], body: [
+      ['Hard stop loss',    'Price drops 3% below entry'],
+      ['Break-even stop',   'Once up 5%, never close below entry'],
+      ['Trailing stop',     '4% below peak  (widens to 5% at +8% gain,  7% at +18%)'],
+      ['Partial exit',      'Sell 33% at +8%,  another 33% at +15%,  trail the rest'],
+      ['Take profit',       'Emergency ceiling at +30% (trailing stop exits first in practice)'],
+      ['Signal exit',       'EMA death cross or MACD histogram flips negative'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 48 } }, margin: M })
+
+    y = addSection('Step 2 — Entry Gate Checks  (global blockers)', nextY())
+    autoTable(doc, { startY: y, head: [['Check', 'Rule']], body: [
+      ['Daily loss circuit-breaker', 'Halt if today\'s loss ≥ 5% of portfolio'],
+      ['VIX filter',                 'Block all longs if VIX > 30'],
+      ['Market regime',              'BULL 1.0×  |  RANGING 0.6×  |  BEAR 0.5×  |  HIGH_VOL block'],
+      ['Buying power',               'Skip if available cash < 1% of equity'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 62 } }, margin: M })
+
+    y = addSection('Steps 3–4 — Universe Assembly & Signal Generation', nextY())
+    autoTable(doc, { startY: y, head: [['Source', 'Detail']], body: [
+      ['Watchlist (40 symbols)',    'Large-cap US: AAPL, MSFT, NVDA, XOM, JPM, GOOGL, META…'],
+      ['Dynamic breakouts (10)',   'Top momentum screeners from a 140-symbol extended universe'],
+      ['News-discovered symbols',  'Alpaca news feed scanned for high-scoring catalyst mentions'],
+      ['BUY threshold',            '50 / 100 signal score required to enter the filter funnel'],
+      ['SELL threshold',           '55 / 100 — triggers signal-based exit on open positions'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 55 } }, margin: M })
+
+    y = addSection('Signal Score Components  (BUY, max 100 pts)', nextY())
+    autoTable(doc, { startY: y, head: [['Signal', 'Points']], body: [
+      ['Price above 50-EMA (long-term uptrend)',    '20'],
+      ['Fast EMA > Slow EMA (short-term uptrend)',  '15'],
+      ['EMA golden cross this bar',                 '20'],
+      ['RSI in 30–75 zone (not overbought)',        '15'],
+      ['MACD histogram turning positive',           '15'],
+      ['Price in lower half of Bollinger Band',     '5–10'],
+      ['Volume 10–25% above 20-day average',        '5–10'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 110 } }, margin: M })
+
+    // ── Page 3: Filter Funnel & Sizing ──────────────────────────────
+    doc.addPage()
+    addHeader('Platform Overview — Filters & Position Sizing')
+    y = 32
+
+    y = addSection('Step 5 — The 8-Layer Filter Funnel', y)
+    autoTable(doc, { startY: y, head: [['#', 'Filter', 'Rule']], body: [
+      ['1', 'Sector rotation',       'Symbol\'s sector must be in top 6 of 11 by 3-month ETF momentum'],
+      ['2', 'Sector concentration',  'Max 3 open positions per GICS sector'],
+      ['3', 'Weekly confirmation',   'Weekly close > 10-week EMA,  RSI 35–75,  MACD positive'],
+      ['4', 'Composite sentiment',   '4-source score (options + analyst + insider + retail) > −3.0'],
+      ['5', 'Earnings blackout',     'Skip if earnings within 2 days'],
+      ['6', 'Correlation limit',     'Skip if Pearson r > 0.70 with any open position'],
+      ['7', '13F smart money',       'Score boosted if top 8 hedge funds are adding (Berkshire, Citadel, Renaissance…)'],
+      ['8', 'ML confidence',         'LightGBM ≥ 52% probability  (58% in BEAR regime,  65% in HIGH_VOL)'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { cellWidth: 8 }, 1: { fontStyle: 'bold', cellWidth: 50 } }, margin: M })
+
+    y = addSection('Step 6 — Position Sizing', nextY())
+    autoTable(doc, { startY: y, head: [['Layer', 'How it works']], body: [
+      ['Kelly Criterion',       'Half-Kelly using win rate & R-ratio once 20+ closed trades exist. Fixed 5% of equity until then.'],
+      ['Risk-based sizing',     'shares = (3% of equity) ÷ ATR stop distance.  Never risks more than 3% per trade.'],
+      ['Regime multiplier',     'RANGING 0.6×,  BEAR 0.5×,  HIGH_VOL blocked,  BULL 1.0×'],
+      ['Volatility targeting',  'Scales down if 20-day annualised vol exceeds 1% per-position budget'],
+      ['Cash check',            'Total cost must be ≤ 95% of available cash'],
+      ['Stop / Take profit',    'SL = entry − ATR.  TP = entry + (ATR × 3)  →  3:1 reward-to-risk ratio'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 52 } }, margin: M })
+
+    y = addSection('Step 7 — VWAP Order Execution', nextY())
+    autoTable(doc, { startY: y, head: [['Aspect', 'Detail']], body: [
+      ['Order type',        'Day limit at VWAP + 0.05% buffer  (never market orders)'],
+      ['Urgent buffer',     '0.10% when ML confidence ≥ 70%'],
+      ['IS Zero guard',     'Skip entries within first 15 min of open  (9:30–9:45 ET)'],
+      ['Stale cancel',      'Auto-cancel if not filled within 3 scans (~30 min)'],
+      ['Adaptive buffer',   'Auto-widens to 0.10% if fill rate drops below 60%'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 50 } }, margin: M })
+
+    // ── Page 4: ML, Sectors & Strategies ────────────────────────────
+    doc.addPage()
+    addHeader('Platform Overview — ML, Sectors & Strategies')
+    y = 32
+
+    y = addSection('Machine Learning Layer', y)
+    autoTable(doc, { startY: y, head: [['Aspect', 'Detail']], body: [
+      ['Model',           'LightGBM binary classifier  (10–20× faster than RandomForest, better out-of-sample AUC)'],
+      ['15 Features',     'RSI, MACD hist, BB position, EMA distances (9/21/50-period), volume ratio, ATR, 5d & 20d momentum, market regime, composite sentiment, signal score, VIX, sector momentum'],
+      ['Target',          '1 if forward 5-day return > 0.5%,  else 0'],
+      ['Validation',      'Walk-forward CV: 9-month train / 3-month validation windows'],
+      ['Retrain',         'Monthly, or after 20+ new closed-trade outcomes accumulated'],
+      ['Thresholds',      'BULL/RANGING 52%  |  BEAR 58%  |  HIGH_VOL 65%'],
+      ['Fail-safe',       'Bypassed entirely (fail-open) if walk-forward AUC < 0.54'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 42 } }, margin: M })
+
+    y = addSection('Sector Rotation  (SPDR ETF Rankings)', nextY())
+    autoTable(doc, { startY: y, head: [['ETF', 'Sector', 'ETF', 'Sector']], body: [
+      ['XLK', 'Technology',             'XLI', 'Industrials'],
+      ['XLV', 'Healthcare',             'XLRE','Real Estate'],
+      ['XLF', 'Financials',             'XLB', 'Materials'],
+      ['XLE', 'Energy',                 'XLU', 'Utilities'],
+      ['XLC', 'Communication Services', 'XLP', 'Consumer Staples'],
+      ['XLY', 'Consumer Discretionary', '',    ''],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 18 }, 2: { fontStyle: 'bold', cellWidth: 18 } }, margin: M })
+    doc.setFontSize(8)
+    doc.setFont('helvetica', 'normal')
+    doc.setTextColor(100, 100, 100)
+    doc.text('Ranked every hour by 3-month price return. Only stocks in top 6 sectors receive buy orders. Max 3 open positions per sector.', 14, nextY() - 4)
+
+    y = addSection('Additional Strategies', nextY())
+    autoTable(doc, { startY: y, head: [['Strategy', 'How it works']], body: [
+      ['Pairs Trading\n(Stat-Arb)', '13 pre-defined cointegrated pairs (JPM/BAC, XOM/CVX, etc.). Go long cheap / short expensive when z-score > ±2.0. Exit at ±0.5. Stop at ±3.5. Max 2 pairs open, 3% equity per leg.'],
+      ['IPO Trading',               'IPOs quarantined 5 days. Queued for human approval in dashboard (60-min window). Auto-execute on timeout. 50% normal size, 4% stop.'],
+      ['Short Selling',             'Currently disabled. When enabled: only shorts stocks in bottom-3 sectors with composite sentiment ≤ −2.0. Max 3 concurrent shorts.'],
+      ['13F Smart Money',           'Monitors 8 top hedge funds (Berkshire, Citadel, Renaissance, Two Sigma…). Boosts signal score by 2 pts per unit of institutional accumulation detected.'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 32 } }, margin: M })
+
+    // ── Page 5: Dashboard & Parameters ──────────────────────────────
+    doc.addPage()
+    addHeader('Platform Overview — Dashboard & Key Parameters')
+    y = 32
+
+    y = addSection('Dashboard Tabs', y)
+    autoTable(doc, { startY: y, head: [['Tab', 'Contents']], body: [
+      ['Overview', 'Portfolio stats, equity curve, open positions, recent trades, market regime, VIX, sector rankings, IPO approvals, pairs positions, bot logs'],
+      ['History',  'All closed trades filtered by date (Today / This Week / All Time) and exit reason. Today P&L, win/loss count, trade duration shown.'],
+      ['Reports',  'PDF downloads: Performance Summary, Trade History, Strategy Review, Quant Benchmarking, Platform Overview'],
+      ['Settings', 'Configure BASE_CAPITAL and withdrawal alert threshold. Persisted to disk across restarts.'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 28 } }, margin: M })
+
+    y = addSection('Key Configuration Parameters', nextY())
+    autoTable(doc, { startY: y, head: [['Parameter', 'Value', 'Purpose']], body: [
+      ['BUY_THRESHOLD',           '50',        'Minimum signal score to enter filter funnel'],
+      ['SELL_THRESHOLD',          '55',        'Minimum score for signal-based position exit'],
+      ['MAX_POSITION_PCT',        '5%',        'Maximum single position size as % of equity'],
+      ['STOP_LOSS_PCT',           '3%',        'Hard stop loss & risk-per-trade sizing input'],
+      ['BREAK_EVEN_TRIGGER_PCT',  '5%',        'Activate break-even protection once up 5%'],
+      ['TRAILING_STOP_PCT',       '4% – 7%',   'Tiered trailing stop by gain level'],
+      ['SECTOR_TOP_N',            '6',         'Buy only in top 6 of 11 sectors by momentum'],
+      ['MAX_POSITIONS_PER_SECTOR','3',         'Sector concentration cap'],
+      ['ML_MIN_PROBABILITY',      '52%–65%',   'Dynamic threshold by market regime'],
+      ['VIX_THRESHOLD',           '30',        'Block all new longs above this VIX reading'],
+      ['KELLY_MIN_TRADES',        '20',        'Closed trades before Kelly Criterion activates'],
+      ['MAX_DAILY_LOSS_PCT',      '5%',        'Daily circuit-breaker — halts new entries'],
+      ['PAIRS_ENTRY_ZSCORE',      '2.0',       'Z-score divergence threshold to enter a pair'],
+      ['PAIRS_EXIT_ZSCORE',       '0.5',       'Z-score reversion level to exit a pair'],
+      ['IPO_MIN_DAYS',            '5',         'Quarantine period before trading new IPOs'],
+      ['EARNINGS_BLACKOUT_DAYS',  '2',         'Days before/after earnings to avoid entry'],
+      ['MAX_POSITION_CORRELATION','0.70',      'Skip if too correlated with an open position'],
+      ['BASE_CAPITAL',            '$100,000',  'Authorised trading pool. Profits above held idle.'],
+    ], theme: 'striped', headStyles: TH, bodyStyles: TB, columnStyles: { 0: { fontStyle: 'bold', cellWidth: 65 }, 1: { cellWidth: 22 } }, margin: M })
+
+    // Page numbers
+    const pages = doc.internal.getNumberOfPages()
+    for (let i = 1; i <= pages; i++) {
+      doc.setPage(i)
+      doc.setFontSize(8)
+      doc.setTextColor(160, 160, 160)
+      doc.text(`STOX Platform Overview  ·  ${now}`, 14, doc.internal.pageSize.getHeight() - 8)
+      doc.text(`Page ${i} of ${pages}`, W - 14, doc.internal.pageSize.getHeight() - 8, { align: 'right' })
+    }
+
+    doc.save(`stox-platform-overview-${new Date().toISOString().slice(0, 10)}.pdf`)
+  })
+
   return (
     <div className="reports-tab">
       <div className="reports-header">
@@ -2037,6 +2286,12 @@ function ReportsTab({ data }) {
           description="Full system analysis: STOX vs. billion-dollar quant funds. Covers every strategy layer, institutional gaps, performance benchmarks, and ranked improvement priorities."
           onDownload={downloadQuantReport}
           loading={loading.quant}
+        />
+        <ReportCard
+          title="Platform Overview"
+          description="Complete 5-page reference: how STOX works end-to-end. Infrastructure, capital management, scan loop, 8-layer filter funnel, ML model, sector rotation, position sizing, VWAP execution, and all key parameters."
+          onDownload={downloadPlatformOverview}
+          loading={loading.overview}
         />
       </div>
 
