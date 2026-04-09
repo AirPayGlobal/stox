@@ -730,7 +730,14 @@ if _DIST.exists():
     @app.get("/{full_path:path}")
     def spa(full_path: str) -> FileResponse:
         """Serve the React SPA for all non-API routes."""
-        return FileResponse(str(_DIST / "index.html"))
+        return FileResponse(
+            str(_DIST / "index.html"),
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 else:
     _logger().warning(
         "React build not found at dashboard/dist. "
