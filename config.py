@@ -32,7 +32,7 @@ class Config:
     PROFIT_WITHDRAWAL_ALERT_PCT: float = float(os.getenv("PROFIT_WITHDRAWAL_ALERT_PCT", "0.10"))
     MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.05"))   # max single position = 5% of equity
     MIN_POSITION_PCT: float = float(os.getenv("MIN_POSITION_PCT", "0.01"))   # don't enter if buying power < 1% of equity
-    STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.02"))
+    STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.03"))
     TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.30"))   # emergency ceiling only; trailing stop is primary exit
     MAX_DAILY_LOSS_PCT: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.05"))
 
@@ -89,7 +89,7 @@ class Config:
     TRAILING_STOP_HIGH_PCT: float = float(os.getenv("TRAILING_STOP_HIGH_PCT", "0.07"))  # gain >= HIGH_TRIGGER: 7% trail
     TRAILING_MID_TRIGGER: float   = float(os.getenv("TRAILING_MID_TRIGGER",   "0.08"))  # loosen trail at +8% gain
     TRAILING_HIGH_TRIGGER: float  = float(os.getenv("TRAILING_HIGH_TRIGGER",  "0.18"))  # loosen trail again at +18% gain
-    BREAK_EVEN_TRIGGER_PCT: float = float(os.getenv("BREAK_EVEN_TRIGGER_PCT", "0.03"))  # once up 3%, never close below entry
+    BREAK_EVEN_TRIGGER_PCT: float = float(os.getenv("BREAK_EVEN_TRIGGER_PCT", "0.05"))  # once up 5%, never close below entry
 
     # Earnings blackout
     EARNINGS_BLACKOUT_DAYS: int = int(os.getenv("EARNINGS_BLACKOUT_DAYS", "2"))  # skip entry within N days of earnings
