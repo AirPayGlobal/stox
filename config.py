@@ -72,7 +72,7 @@ class Config:
     THIRTEEN_F_BOOST_SCALE: float = float(os.getenv("THIRTEEN_F_BOOST_SCALE", "2.0"))  # pts per 13F unit
 
     # Sector rotation
-    SECTOR_TOP_N: int = int(os.getenv("SECTOR_TOP_N", "4"))           # only buy in top N sectors by 3-month momentum
+    SECTOR_TOP_N: int = int(os.getenv("SECTOR_TOP_N", "6"))           # only buy in top N sectors by 3-month momentum
     MAX_POSITIONS_PER_SECTOR: int = int(os.getenv("MAX_POSITIONS_PER_SECTOR", "3"))  # cap per GICS sector to limit concentration
 
     # Kelly Criterion position sizing
