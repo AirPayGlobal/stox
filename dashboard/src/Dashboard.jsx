@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
+import { jsPDF } from 'jspdf'
+import autoTable from 'jspdf-autotable'
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
@@ -1412,8 +1414,6 @@ function ReportsTab({ data }) {
 
   // ---- Performance Summary PDF ----
   const downloadPerformance = () => buildPdf('perf', async () => {
-    const { jsPDF } = await import('jspdf')
-    const { default: autoTable } = await import('jspdf-autotable')
 
     const analyticsRes = await fetchAnalytics().catch(() => ({ data: null }))
     const reviewRes    = await fetchReview(period).catch(() => ({ data: null }))
@@ -1536,8 +1536,6 @@ function ReportsTab({ data }) {
 
   // ---- Trade History PDF ----
   const downloadTradeHistory = () => buildPdf('trades', async () => {
-    const { jsPDF } = await import('jspdf')
-    const { default: autoTable } = await import('jspdf-autotable')
 
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' })
     const W   = doc.internal.pageSize.getWidth()
@@ -1620,8 +1618,6 @@ function ReportsTab({ data }) {
 
   // ---- Strategy Review PDF ----
   const downloadStrategyReview = () => buildPdf('review', async () => {
-    const { jsPDF } = await import('jspdf')
-    const { default: autoTable } = await import('jspdf-autotable')
 
     const reviewRes = await fetchReview(period)
     const review    = reviewRes.data
@@ -1749,8 +1745,6 @@ function ReportsTab({ data }) {
 
   // ---- Quant Benchmarking PDF ----
   const downloadQuantReport = () => buildPdf('quant', async () => {
-    const { jsPDF } = await import('jspdf')
-    const { default: autoTable } = await import('jspdf-autotable')
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
     const W = doc.internal.pageSize.getWidth()
@@ -1997,8 +1991,6 @@ function ReportsTab({ data }) {
 
   // ---- Platform Overview PDF ----
   const downloadPlatformOverview = () => buildPdf('overview', async () => {
-    const { jsPDF } = await import('jspdf')
-    const { default: autoTable } = await import('jspdf-autotable')
 
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
     const W = doc.internal.pageSize.getWidth()
