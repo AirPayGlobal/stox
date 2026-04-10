@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 _PORTFOLIO_FILE = os.environ.get(
     "PORTFOLIO_FILE",
-    os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs", "portfolio.json"),
+    "/data/portfolio.json",
 )
 
 

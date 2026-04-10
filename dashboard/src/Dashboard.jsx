@@ -287,14 +287,24 @@ function EquityChart({ snapshots, account }) {
 
 // ------------------------------------------------------------------ Positions table
 
-function TpCell({ tp, currentPrice, entry }) {
+function TpCell({ tp, currentPrice, entry, side }) {
   if (!tp || !currentPrice || !entry) return <span className="muted">—</span>
 
-  const pctToTp = (tp - currentPrice) / currentPrice
-  const totalPct = (tp - entry) / entry
-  const progress = Math.min(1, Math.max(0, (currentPrice - entry) / (tp - entry)))
-  const isClose = pctToTp <= 0.03   // within 3% of TP
-  const hit     = currentPrice >= tp
+  const isShort = side === 'short'
+
+  // For longs:  TP above entry, hit when price rises to tp
+  // For shorts: TP below entry, hit when price falls to tp
+  const hit     = isShort ? currentPrice <= tp : currentPrice >= tp
+  const pctToTp = isShort
+    ? (currentPrice - tp) / currentPrice          // how far still needs to fall
+    : (tp - currentPrice) / currentPrice          // how far still needs to rise
+  const totalPct = isShort
+    ? (entry - tp) / entry
+    : (tp - entry) / entry
+  const progress = isShort
+    ? Math.min(1, Math.max(0, (entry - currentPrice) / (entry - tp)))
+    : Math.min(1, Math.max(0, (currentPrice - entry) / (tp - entry)))
+  const isClose  = pctToTp <= 0.03
 
   if (hit) return <span className="badge badge-profit">TP Hit</span>
 
@@ -303,7 +313,7 @@ function TpCell({ tp, currentPrice, entry }) {
       <div className="tp-price">
         {fmt$(tp)}
         <span className={`tp-pct ${isClose ? 'green' : 'muted'}`}>
-          {pctToTp >= 0 ? `+${fmtPct(pctToTp)} away` : <span className="green">reached</span>}
+          +{fmtPct(pctToTp)} away
         </span>
       </div>
       <div className="tp-bar-track">
@@ -363,7 +373,7 @@ function PositionsTable({ positions }) {
                       </span>
                     </td>
                     <td>
-                      <TpCell tp={p.take_profit} currentPrice={currentPrice} entry={p.avg_entry} />
+                      <TpCell tp={p.take_profit} currentPrice={currentPrice} entry={p.avg_entry} side={p.side} />
                     </td>
                   </tr>
                 )

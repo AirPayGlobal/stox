@@ -35,8 +35,9 @@ COPY . .
 # Copy the compiled React app from stage 1
 COPY --from=frontend /build/dist ./dashboard/dist
 
-# Create logs directory (portfolio.json lives here)
-RUN mkdir -p logs
+# /data is the Railway Volume mount point — portfolio.json persists here across deploys.
+# The RUN mkdir ensures the directory exists even without a volume (fallback to ephemeral).
+RUN mkdir -p /data logs
 
 EXPOSE 8000
 
