@@ -200,11 +200,13 @@ async def patch_settings(request: Request, _: str = Depends(verify)) -> dict:
 def positions(_: str = Depends(verify)) -> dict[str, Any]:
     try:
         from trading.alpaca_client import get_positions
+        from trading.portfolio import Portfolio
         from analysis.earnings_calendar import days_to_earnings
         result = get_positions()
 
-        # Enrich with portfolio take_profit/stop_loss and earnings date
-        port = _portfolio()
+        # Always load a fresh Portfolio from disk — the singleton may be stale
+        # if the bot has written new records since startup (e.g. after a restore).
+        port = Portfolio()
         for symbol, pos in result.items():
             trade = port.get_open_trade(symbol)
             pos["take_profit"] = trade.take_profit if trade else None

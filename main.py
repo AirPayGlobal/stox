@@ -791,12 +791,13 @@ class TradingBot:
             entry = pos["avg_entry"]
             side  = "SHORT" if pos["side"] == "short" else "BUY"
             shares = int(abs(pos["qty"]))
+            stop_dist = entry * Config.STOP_LOSS_PCT
             if side == "SHORT":
-                stop = entry * (1 + Config.STOP_LOSS_PCT)
-                tp   = entry * (1 - Config.TAKE_PROFIT_PCT)
+                stop = entry + stop_dist
+                tp   = entry - stop_dist * 3   # 3:1 R:R
             else:
-                stop = entry * (1 - Config.STOP_LOSS_PCT)
-                tp   = entry * (1 + Config.TAKE_PROFIT_PCT)
+                stop = entry - stop_dist
+                tp   = entry + stop_dist * 3   # 3:1 R:R
             self.portfolio.open_trade(
                 symbol=symbol, side=side, shares=shares,
                 entry_price=entry, stop_loss=stop, take_profit=tp,
