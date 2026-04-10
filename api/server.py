@@ -200,7 +200,22 @@ async def patch_settings(request: Request, _: str = Depends(verify)) -> dict:
 def positions(_: str = Depends(verify)) -> dict[str, Any]:
     try:
         from trading.alpaca_client import get_positions
-        return get_positions()
+        from analysis.earnings_calendar import days_to_earnings
+        result = get_positions()
+
+        # Enrich with portfolio take_profit/stop_loss and earnings date
+        port = _portfolio()
+        for symbol, pos in result.items():
+            trade = port.get_open_trade(symbol)
+            pos["take_profit"] = trade.take_profit if trade else None
+            pos["stop_loss"]   = trade.stop_loss   if trade else None
+            try:
+                dte = days_to_earnings(symbol)
+                pos["days_to_earnings"] = dte
+            except Exception:
+                pos["days_to_earnings"] = None
+
+        return result
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 

@@ -965,6 +965,78 @@ tbody tr:hover { background: rgba(255,255,255,0.03); }
   border-radius: 6px;
 }
 
+/* ------------------------------------------------------------------ TP cell */
+
+.tp-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 130px;
+}
+
+.tp-price {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tp-pct {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.tp-bar-track {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.tp-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue) 0%, var(--green) 100%);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.tp-sub {
+  font-size: 10px;
+}
+
+/* ------------------------------------------------------------------ Earnings badge */
+
+.earnings-badge {
+  display: inline-block;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin-left: 6px;
+  padding: 1px 6px;
+  vertical-align: middle;
+}
+
+.earnings-imminent {
+  background: rgba(248, 81, 73, 0.18);
+  border: 1px solid rgba(248, 81, 73, 0.5);
+  color: var(--red);
+}
+
+.earnings-soon {
+  background: rgba(210, 153, 34, 0.18);
+  border: 1px solid rgba(210, 153, 34, 0.5);
+  color: var(--yellow);
+}
+
+.earnings-upcoming {
+  background: rgba(139, 148, 158, 0.15);
+  border: 1px solid rgba(139, 148, 158, 0.3);
+  color: var(--muted);
+}
+
 /* ------------------------------------------------------------------ History tab */
 
 .history-tab {

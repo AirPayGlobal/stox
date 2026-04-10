@@ -287,6 +287,41 @@ function EquityChart({ snapshots, account }) {
 
 // ------------------------------------------------------------------ Positions table
 
+function TpCell({ tp, currentPrice, entry }) {
+  if (!tp || !currentPrice || !entry) return <span className="muted">—</span>
+
+  const pctToTp = (tp - currentPrice) / currentPrice
+  const totalPct = (tp - entry) / entry
+  const progress = Math.min(1, Math.max(0, (currentPrice - entry) / (tp - entry)))
+  const isClose = pctToTp <= 0.03   // within 3% of TP
+  const hit     = currentPrice >= tp
+
+  if (hit) return <span className="badge badge-profit">TP Hit</span>
+
+  return (
+    <div className="tp-cell">
+      <div className="tp-price">
+        {fmt$(tp)}
+        <span className={`tp-pct ${isClose ? 'green' : 'muted'}`}>
+          {pctToTp >= 0 ? `+${fmtPct(pctToTp)} away` : <span className="green">reached</span>}
+        </span>
+      </div>
+      <div className="tp-bar-track">
+        <div className="tp-bar-fill" style={{ width: `${(progress * 100).toFixed(1)}%` }} />
+      </div>
+      <div className="tp-sub muted">{fmtPct(totalPct)} total target</div>
+    </div>
+  )
+}
+
+function EarningsBadge({ days }) {
+  if (days == null) return null
+  if (days <= 2)  return <span className="earnings-badge earnings-imminent">Earnings in {days}d</span>
+  if (days <= 7)  return <span className="earnings-badge earnings-soon">Earnings in {days}d</span>
+  if (days <= 21) return <span className="earnings-badge earnings-upcoming">Earnings in {days}d</span>
+  return null
+}
+
 function PositionsTable({ positions }) {
   const rows = Object.entries(positions).map(([symbol, p]) => ({ symbol, ...p }))
 
@@ -306,23 +341,33 @@ function PositionsTable({ positions }) {
                 <th>Market Value</th>
                 <th>Unrealised P&L</th>
                 <th>P&L %</th>
+                <th>Take Profit Target</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map((p) => (
-                <tr key={p.symbol}>
-                  <td className="symbol">{p.symbol}</td>
-                  <td>{p.qty}</td>
-                  <td>{fmt$(p.avg_entry)}</td>
-                  <td>{fmt$(p.market_value)}</td>
-                  <td><PnlCell value={p.unrealised_pl} /></td>
-                  <td>
-                    <span className={p.unrealised_plpc >= 0 ? 'green' : 'red'}>
-                      {fmtPct(p.unrealised_plpc)}
-                    </span>
-                  </td>
-                </tr>
-              ))}
+              {rows.map((p) => {
+                const currentPrice = p.qty ? p.market_value / p.qty : null
+                return (
+                  <tr key={p.symbol}>
+                    <td className="symbol">
+                      {p.symbol}
+                      <EarningsBadge days={p.days_to_earnings} />
+                    </td>
+                    <td>{p.qty}</td>
+                    <td>{fmt$(p.avg_entry)}</td>
+                    <td>{fmt$(p.market_value)}</td>
+                    <td><PnlCell value={p.unrealised_pl} /></td>
+                    <td>
+                      <span className={p.unrealised_plpc >= 0 ? 'green' : 'red'}>
+                        {fmtPct(p.unrealised_plpc)}
+                      </span>
+                    </td>
+                    <td>
+                      <TpCell tp={p.take_profit} currentPrice={currentPrice} entry={p.avg_entry} />
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
