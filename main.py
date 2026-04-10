@@ -773,6 +773,40 @@ class TradingBot:
                     f"LONG {qty_long}×{sym_long} / SHORT {qty_short}×{sym_short}"
                 )
 
+    def _restore_missing_trades(self, open_positions: dict) -> None:
+        """
+        Ensure every open Alpaca position has a local portfolio record.
+
+        After a Railway redeploy the ephemeral filesystem is wiped, so
+        portfolio.json is gone. Without a record the trailing-stop / break-even
+        / partial-exit logic in _check_exits is skipped entirely (the
+        `if trade:` guard falls through to signal-only exits).
+
+        We reconstruct a minimal record from Alpaca's avg_entry_price so that
+        all exit mechanisms work correctly even after a restart.
+        """
+        for symbol, pos in open_positions.items():
+            if self.portfolio.get_open_trade(symbol):
+                continue  # already tracked — nothing to do
+            entry = pos["avg_entry"]
+            side  = "SHORT" if pos["side"] == "short" else "BUY"
+            shares = int(abs(pos["qty"]))
+            if side == "SHORT":
+                stop = entry * (1 + Config.STOP_LOSS_PCT)
+                tp   = entry * (1 - Config.TAKE_PROFIT_PCT)
+            else:
+                stop = entry * (1 - Config.STOP_LOSS_PCT)
+                tp   = entry * (1 + Config.TAKE_PROFIT_PCT)
+            self.portfolio.open_trade(
+                symbol=symbol, side=side, shares=shares,
+                entry_price=entry, stop_loss=stop, take_profit=tp,
+                order_id=f"restored-{symbol}",
+            )
+            logger.warning(
+                f"Restored missing portfolio record: {symbol} {side} "
+                f"x{shares} @ ${entry:.2f} (SL=${stop:.2f} TP=${tp:.2f})"
+            )
+
     def _check_exits(self, open_positions: dict, equity: float) -> None:
         """
         Exit checks for existing positions:
@@ -785,6 +819,9 @@ class TradingBot:
         """
         from data.fetcher import fetch_bars, fetch_latest_price
         from trading.alpaca_client import cover_short_order
+
+        # Reconstruct any portfolio records lost on restart (ephemeral filesystem)
+        self._restore_missing_trades(open_positions)
 
         # Warn about any open positions approaching earnings
         warn_open_positions_near_earnings(list(open_positions.keys()), days_before=3)
