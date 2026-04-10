@@ -162,6 +162,8 @@ function StatsRow({ account, summary, posCount }) {
   const pnl = summary?.total_pnl ?? 0
   const winRate = summary?.win_rate ?? null
   const totalTrades = summary?.total_trades ?? 0
+  const winningTrades = summary?.winning_trades ?? 0
+  const totalWinPnl = summary?.total_win_pnl ?? 0
 
   return (
     <div className="stats-row">
@@ -183,11 +185,11 @@ function StatsRow({ account, summary, posCount }) {
       />
       <StatCard
         label="Realised P&L"
-        value={fmt$(account?.alpaca_realized_pl ?? pnl)}
-        sub={account?.alpaca_realized_pl != null
-          ? `Alpaca · ${totalTrades} closed tracked`
-          : `${totalTrades} closed trade${totalTrades !== 1 ? 's' : ''}`}
-        valueClass={(account?.alpaca_realized_pl ?? pnl) > 0 ? 'green' : (account?.alpaca_realized_pl ?? pnl) < 0 ? 'red' : ''}
+        value={fmt$(pnl)}
+        sub={totalTrades > 0
+          ? `${totalTrades} closed · ${winningTrades} winners (${fmt$(totalWinPnl)})`
+          : 'No closed trades yet'}
+        valueClass={pnl > 0 ? 'green' : pnl < 0 ? 'red' : ''}
       />
       <StatCard
         label="Win Rate"

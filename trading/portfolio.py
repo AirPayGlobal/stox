@@ -189,8 +189,10 @@ class Portfolio:
         return {
             "total_trades": len(closed),
             "open_trades": len([t for t in self.trades if t.status == "OPEN"]),
+            "winning_trades": len(winners),
             "win_rate": win_rate,
             "total_pnl": total_pnl,
+            "total_win_pnl": sum(t.pnl for t in winners),
             "avg_win": avg_win,
             "avg_loss": avg_loss,
             "profit_factor": profit_factor,
