@@ -183,9 +183,11 @@ function StatsRow({ account, summary, posCount }) {
       />
       <StatCard
         label="Realised P&L"
-        value={fmt$(pnl)}
-        sub={`${totalTrades} closed trade${totalTrades !== 1 ? 's' : ''}`}
-        valueClass={pnl > 0 ? 'green' : pnl < 0 ? 'red' : ''}
+        value={fmt$(account?.alpaca_realized_pl ?? pnl)}
+        sub={account?.alpaca_realized_pl != null
+          ? `Alpaca · ${totalTrades} closed tracked`
+          : `${totalTrades} closed trade${totalTrades !== 1 ? 's' : ''}`}
+        valueClass={(account?.alpaca_realized_pl ?? pnl) > 0 ? 'green' : (account?.alpaca_realized_pl ?? pnl) < 0 ? 'red' : ''}
       />
       <StatCard
         label="Win Rate"

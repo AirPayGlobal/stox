@@ -123,16 +123,23 @@ def market_status(_: str = Depends(verify)) -> dict[str, Any]:
 @app.get("/api/account")
 def account(_: str = Depends(verify)) -> dict[str, Any]:
     try:
-        from trading.alpaca_client import get_account
+        from trading.alpaca_client import get_account, get_realized_pnl
         data = get_account()
         cfg = _config()
         base = cfg.BASE_CAPITAL
         equity = data.get("equity", 0)
         cash_balance = data.get("cash", 0)
         data["base_capital"] = base
-        data["unrealised_growth"] = equity - base           # total equity gain (open + closed), may be negative
-        data["withdrawable_cash"] = max(0.0, cash_balance - base)  # actual idle cash above base — safe to withdraw
+        data["unrealised_growth"] = equity - base
+        data["withdrawable_cash"] = max(0.0, cash_balance - base)
         data["withdrawal_alert"] = data["withdrawable_cash"] >= base * cfg.PROFIT_WITHDRAWAL_ALERT_PCT
+
+        # Alpaca-sourced realized P&L — ground truth regardless of local portfolio.json state
+        alpaca_pnl = get_realized_pnl()
+        data["alpaca_realized_pl"]      = alpaca_pnl["realized_pl"]
+        data["alpaca_unrealized_pl"]    = alpaca_pnl["unrealized_pl"]
+        data["alpaca_total_return_pct"] = alpaca_pnl["total_return_pct"]
+        data["alpaca_start_equity"]     = alpaca_pnl["start_equity"]
         return data
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc))

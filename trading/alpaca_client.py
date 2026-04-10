@@ -69,6 +69,57 @@ def get_account() -> dict:
     }
 
 
+def get_realized_pnl() -> dict:
+    """
+    Derive realized P&L directly from Alpaca — the ground truth.
+
+    Formula:
+        realized_pl = (current_equity - start_equity) - current_unrealized_pl
+
+    where start_equity is the earliest non-zero equity point in the 1Y
+    portfolio history and current_unrealized_pl is the sum of unrealized
+    P&L across all open positions.
+
+    Returns a dict with:
+        realized_pl       — total realized P&L in $
+        total_return_pct  — (current_equity - start_equity) / start_equity
+        start_equity      — equity at start of history
+        current_equity    — current equity
+        unrealized_pl     — current open position unrealized P&L
+    """
+    try:
+        from alpaca.trading.requests import GetPortfolioHistoryRequest
+        req = GetPortfolioHistoryRequest(period="1A", timeframe="1D", extended_hours=False)
+        history = get_trading_client().get_portfolio_history(req)
+
+        equities = [float(e) for e in history.equity if e is not None and float(e) > 0]
+        start_equity = equities[0] if equities else 0.0
+        current_equity = float(get_trading_client().get_account().equity)
+
+        positions = get_positions()
+        unrealized_pl = sum(p["unrealised_pl"] for p in positions.values())
+
+        realized_pl = (current_equity - start_equity) - unrealized_pl
+        total_return_pct = (current_equity - start_equity) / start_equity if start_equity else 0.0
+
+        return {
+            "realized_pl": round(realized_pl, 2),
+            "total_return_pct": round(total_return_pct, 4),
+            "start_equity": round(start_equity, 2),
+            "current_equity": round(current_equity, 2),
+            "unrealized_pl": round(unrealized_pl, 2),
+        }
+    except Exception as exc:
+        logger.warning(f"get_realized_pnl failed: {exc}")
+        return {
+            "realized_pl": None,
+            "total_return_pct": None,
+            "start_equity": None,
+            "current_equity": None,
+            "unrealized_pl": None,
+        }
+
+
 def get_positions() -> dict[str, dict]:
     """Return open positions keyed by symbol."""
     positions = get_trading_client().get_all_positions()
