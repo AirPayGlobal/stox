@@ -189,11 +189,21 @@ class TradingBot:
         # Daily loss circuit-breaker
         if self.risk.daily_loss_exceeded(equity):
             logger.warning("Daily loss limit hit — no new trades today.")
+            # Pairs trading is market-neutral — still runs even when directional entries are off
+            try:
+                self.scan_pairs({}, equity)
+            except Exception as exc:
+                logger.error(f"Pairs scan error: {exc}")
             return
 
-        # VIX filter — skip all new entries during high-fear market conditions
+        # VIX filter — skip directional entries during high-fear market conditions
         if is_vix_too_high():
             logger.warning("VIX filter active — no new BUY entries this scan.")
+            # Pairs trading is market-neutral — still runs even when VIX is elevated
+            try:
+                self.scan_pairs({}, equity)
+            except Exception as exc:
+                logger.error(f"Pairs scan error: {exc}")
             return
 
         # Regime detection — log regime and block HIGH_VOL entries
@@ -202,6 +212,11 @@ class TradingBot:
         logger.info(f"Market regime: {regime.value} (sizing multiplier: {sizing_mult:.1f}x)")
         if Config.REGIME_FILTER_ENABLED and not regime_allows_longs():
             logger.warning(f"Regime {regime.value} — no new long entries this scan.")
+            # Pairs trading is market-neutral — still runs in HIGH_VOL regime
+            try:
+                self.scan_pairs({}, equity)
+            except Exception as exc:
+                logger.error(f"Pairs scan error: {exc}")
             return
 
         # Refresh positions after exits before evaluating capacity
