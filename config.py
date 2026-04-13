@@ -112,7 +112,7 @@ class Config:
     EARNINGS_BLACKOUT_DAYS: int = int(os.getenv("EARNINGS_BLACKOUT_DAYS", "2"))  # skip entry within N days of earnings
 
     # Correlation limit
-    MAX_POSITION_CORRELATION: float = float(os.getenv("MAX_POSITION_CORRELATION", "0.7"))  # skip if r > this with any open position
+    MAX_POSITION_CORRELATION: float = float(os.getenv("MAX_POSITION_CORRELATION", "0.85"))  # skip if r > this with any open position
 
     # Market filters
     VIX_THRESHOLD: float = float(os.getenv("VIX_THRESHOLD", "30"))   # skip buys when VIX > this (regime handles 25-30 via sizing)
