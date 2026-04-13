@@ -178,9 +178,11 @@ function StatsRow({ account, summary, posCount }) {
         sub={`Base capital: ${fmt$(account?.base_capital ?? 100000)}`}
       />
       <StatCard
-        label="Idle Cash (Above Base)"
+        label="Withdrawable Profit"
         value={fmt$(account?.withdrawable_cash ?? 0)}
-        sub={account?.withdrawal_alert ? '⚠ Ready to withdraw' : 'Held outside trading pool'}
+        sub={account?.withdrawal_alert
+          ? '⚠ Withdraw from Alpaca now'
+          : `Equity above $${((account?.base_capital ?? 100000) / 1000).toFixed(0)}k base`}
         valueClass={(account?.withdrawable_cash ?? 0) > 0 ? 'green' : ''}
       />
       <StatCard

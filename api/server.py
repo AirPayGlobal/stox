@@ -131,7 +131,9 @@ def account(_: str = Depends(verify)) -> dict[str, Any]:
         cash_balance = data.get("cash", 0)
         data["base_capital"] = base
         data["unrealised_growth"] = equity - base
-        data["withdrawable_cash"] = max(0.0, cash_balance - base)
+        # Withdrawable = total account growth above base capital.
+        # Using equity (not cash) so it's correct even when capital is deployed in open positions.
+        data["withdrawable_cash"] = max(0.0, equity - base)
         data["withdrawal_alert"] = data["withdrawable_cash"] >= base * cfg.PROFIT_WITHDRAWAL_ALERT_PCT
 
         # Alpaca-sourced realized P&L — ground truth regardless of local portfolio.json state
