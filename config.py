@@ -51,11 +51,28 @@ class Config:
 
     # Universe of stocks to scan (S&P 500 large-caps)
     WATCHLIST: list = [
-        "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META", "TSLA", "BRK.B",
-        "UNH", "JNJ", "V", "XOM", "JPM", "PG", "MA", "HD", "CVX", "LLY",
-        "ABBV", "MRK", "AVGO", "COST", "PEP", "KO", "TMO", "BAC", "WMT",
-        "CSCO", "ACN", "MCD", "ABT", "DHR", "CRM", "NEE", "TXN", "ADBE",
-        "NKE", "PM", "LIN", "BMY", "RTX", "QCOM", "AMGN", "UPS", "SBUX",
+        # Tech (XLK)
+        "AAPL", "MSFT", "NVDA", "AVGO", "CSCO", "TXN", "ADBE", "QCOM", "CRM", "ACN",
+        # Communication (XLC)
+        "GOOGL", "META", "AMZN",
+        # Financials (XLF)
+        "JPM", "BAC", "V", "MA", "BLK", "BRK.B",
+        # Healthcare (XLV)
+        "UNH", "JNJ", "LLY", "ABBV", "MRK", "ABT", "TMO", "DHR", "AMGN", "BMY",
+        # Consumer Staples (XLP)
+        "PG", "KO", "PEP", "COST", "WMT", "PM",
+        # Consumer Discretionary (XLY)
+        "HD", "MCD", "NKE", "SBUX", "TSLA",
+        # Industrials (XLI)
+        "RTX", "UPS", "HON", "DE", "CAT", "GE", "ETN", "EMR",
+        # Energy (XLE)
+        "XOM", "CVX", "SLB", "COP", "EOG", "OXY",
+        # Utilities (XLU)
+        "NEE", "SO", "DUK", "AEP", "D",
+        # Materials (XLB)
+        "LIN", "APD", "SHW", "NEM", "FCX",
+        # Real Estate (XLRE)
+        "AMT", "PLD", "EQIX", "PSA", "O", "CCI",
     ]
 
     # Multi-timeframe confirmation
@@ -72,7 +89,7 @@ class Config:
     THIRTEEN_F_BOOST_SCALE: float = float(os.getenv("THIRTEEN_F_BOOST_SCALE", "2.0"))  # pts per 13F unit
 
     # Sector rotation
-    SECTOR_TOP_N: int = int(os.getenv("SECTOR_TOP_N", "6"))           # only buy in top N sectors by 3-month momentum
+    SECTOR_TOP_N: int = int(os.getenv("SECTOR_TOP_N", "8"))           # only buy in top N sectors by 3-month momentum
     MAX_POSITIONS_PER_SECTOR: int = int(os.getenv("MAX_POSITIONS_PER_SECTOR", "3"))  # cap per GICS sector to limit concentration
 
     # Kelly Criterion position sizing
