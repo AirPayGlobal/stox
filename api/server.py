@@ -61,6 +61,22 @@ def _portfolio():
     return _portfolio_cache["instance"]
 
 
+# Short-lived cache for the positions endpoint Portfolio read (60s TTL).
+# Avoids a disk read on every dashboard poll while staying fresh enough
+# for TP/SL display purposes.
+_positions_portfolio_cache: dict = {"instance": None, "ts": 0.0}
+
+def _fresh_portfolio():
+    """Return a Portfolio loaded from disk, cached for 60 seconds."""
+    import time
+    now = time.monotonic()
+    if _positions_portfolio_cache["instance"] is None or (now - _positions_portfolio_cache["ts"]) > 60:
+        from trading.portfolio import Portfolio
+        _positions_portfolio_cache["instance"] = Portfolio()
+        _positions_portfolio_cache["ts"] = now
+    return _positions_portfolio_cache["instance"]
+
+
 # ------------------------------------------------------------------ Auto-start
 # Deferred to startup event so /health is responsive before the bot's
 # heavy imports (ML, yfinance, sklearn) begin loading in the background thread.
@@ -215,9 +231,7 @@ def positions(_: str = Depends(verify)) -> dict[str, Any]:
         from analysis.earnings_calendar import days_to_earnings
         result = get_positions()
 
-        # Always load a fresh Portfolio from disk — the singleton may be stale
-        # if the bot has written new records since startup (e.g. after a restore).
-        port = Portfolio()
+        port = _fresh_portfolio()
         for symbol, pos in result.items():
             trade = port.get_open_trade(symbol)
             pos["take_profit"] = trade.take_profit if trade else None

@@ -34,11 +34,20 @@ _NEGATIVE = {
 }
 
 
+_vix_cache: dict = {"value": None, "ts": 0.0}
+_VIX_CACHE_TTL = 300  # 5 minutes — VIX doesn't move meaningfully in seconds
+
+
 def get_vix() -> float:
     """
     Return the latest VIX (CBOE Volatility Index) level.
-    Uses yfinance to pull ^VIX. Falls back to a neutral 20.0 on any error.
+    Uses yfinance to pull ^VIX. Result cached for 5 minutes to avoid
+    hammering yfinance on every dashboard poll. Falls back to 20.0 on error.
     """
+    import time
+    now = time.monotonic()
+    if _vix_cache["value"] is not None and (now - _vix_cache["ts"]) < _VIX_CACHE_TTL:
+        return _vix_cache["value"]
     try:
         import yfinance as yf
         ticker = yf.Ticker("^VIX")
@@ -47,6 +56,8 @@ def get_vix() -> float:
             logger.warning("VIX data empty — assuming neutral (20.0)")
             return 20.0
         vix = float(hist["Close"].iloc[-1])
+        _vix_cache["value"] = vix
+        _vix_cache["ts"] = now
         logger.info(f"VIX = {vix:.2f}")
         return vix
     except Exception as exc:
