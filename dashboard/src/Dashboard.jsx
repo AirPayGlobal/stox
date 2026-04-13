@@ -173,9 +173,9 @@ function StatsRow({ account, summary, posCount }) {
         sub={`Cash ${fmt$(account?.cash)}`}
       />
       <StatCard
-        label="Buying Power"
-        value={fmt$(account?.buying_power)}
-        sub={`Base capital: ${fmt$(account?.base_capital ?? 100000)}`}
+        label="Deployable Capital"
+        value={fmt$(account?.deployable_capital ?? account?.buying_power)}
+        sub={`Capped at ${fmt$(account?.base_capital ?? 100000)} base`}
       />
       <StatCard
         label="Withdrawable Profit"

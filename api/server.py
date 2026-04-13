@@ -131,6 +131,8 @@ def account(_: str = Depends(verify)) -> dict[str, Any]:
         cash_balance = data.get("cash", 0)
         data["base_capital"] = base
         data["unrealised_growth"] = equity - base
+        # Deployable = what the bot actually uses (capped at base capital)
+        data["deployable_capital"] = min(data.get("buying_power", 0), base)
         # Withdrawable = total account growth above base capital.
         # Using equity (not cash) so it's correct even when capital is deployed in open positions.
         data["withdrawable_cash"] = max(0.0, equity - base)
