@@ -88,7 +88,7 @@ def weekly_confirms_entry(df: pd.DataFrame, symbol: str = "") -> bool:
         rsi_ok    = 35 <= latest["rsi_w"] <= 75
         macd_ok   = latest["macd_hist_w"] > 0 or (
             latest["macd_hist_w"] > prev["macd_hist_w"] and
-            latest["macd_hist_w"] > -0.5   # recently turning
+            latest["macd_hist_w"] > -2.0   # improving from correction — weekly MACD lags price by weeks
         )
 
         passes = above_ema and rsi_ok and macd_ok
