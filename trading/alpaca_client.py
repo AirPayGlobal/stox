@@ -23,6 +23,11 @@ logger = get_logger(__name__)
 _trading_client: Optional[TradingClient] = None
 
 
+def _f(val, default: float = 0.0) -> float:
+    """Safe float conversion — returns default when val is None."""
+    return float(val) if val is not None else default
+
+
 def get_trading_client() -> TradingClient:
     global _trading_client
     if _trading_client is None:
@@ -42,7 +47,7 @@ def validate_credentials() -> tuple[bool, str]:
     """
     try:
         account = get_trading_client().get_account()
-        equity = float(account.equity)
+        equity = _f(account.equity)
         return True, f"equity=${equity:,.2f} account_id={account.id}"
     except APIError as exc:
         if exc.status_code in (401, 403):
@@ -60,10 +65,10 @@ def get_account() -> dict:
     """Return account details as a plain dict."""
     account = get_trading_client().get_account()
     return {
-        "equity": float(account.equity),
-        "cash": float(account.cash),
-        "buying_power": float(account.buying_power),
-        "portfolio_value": float(account.portfolio_value),
+        "equity": _f(account.equity),
+        "cash": _f(account.cash),
+        "buying_power": _f(account.buying_power),
+        "portfolio_value": _f(account.portfolio_value),
         "daytrade_count": account.daytrade_count,
         "pattern_day_trader": account.pattern_day_trader,
     }
@@ -94,7 +99,7 @@ def get_realized_pnl() -> dict:
 
         equities = [float(e) for e in history.equity if e is not None and float(e) > 0]
         start_equity = equities[0] if equities else 0.0
-        current_equity = float(get_trading_client().get_account().equity)
+        current_equity = _f(get_trading_client().get_account().equity)
 
         positions = get_positions()
         unrealized_pl = sum(p["unrealised_pl"] for p in positions.values())
@@ -125,11 +130,11 @@ def get_positions() -> dict[str, dict]:
     positions = get_trading_client().get_all_positions()
     return {
         p.symbol: {
-            "qty": float(p.qty),
-            "avg_entry": float(p.avg_entry_price),
-            "market_value": float(p.market_value),
-            "unrealised_pl": float(p.unrealized_pl),
-            "unrealised_plpc": float(p.unrealized_plpc),
+            "qty": _f(p.qty),
+            "avg_entry": _f(p.avg_entry_price),
+            "market_value": _f(p.market_value),
+            "unrealised_pl": _f(p.unrealized_pl),
+            "unrealised_plpc": _f(p.unrealized_plpc),
             "side": p.side.value,
         }
         for p in positions
