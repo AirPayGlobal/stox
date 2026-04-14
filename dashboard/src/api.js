@@ -35,8 +35,8 @@ export async function stopBot() {
   return client.post('/api/bot/stop')
 }
 
-export async function fetchLogs(lines = 100) {
-  return client.get(`/api/logs?lines=${lines}`)
+export async function fetchLogs(hours = 72) {
+  return client.get(`/api/logs?hours=${hours}`)
 }
 
 export async function fetchPendingTrades() {

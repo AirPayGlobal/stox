@@ -1262,7 +1262,7 @@ function LogViewer() {
   const bodyRef = useRef(null)
 
   useEffect(() => {
-    const load = () => fetchLogs(150).then(r => setLogs(r.data.lines)).catch(() => {})
+    const load = () => fetchLogs(72).then(r => setLogs(r.data.lines)).catch(() => {})
     load()
     const id = setInterval(load, 10_000)
     return () => clearInterval(id)
@@ -1277,7 +1277,7 @@ function LogViewer() {
   return (
     <div className="log-viewer">
       <div className="log-header" onClick={() => setOpen(o => !o)}>
-        <span>Bot Logs</span>
+        <span>Bot Logs <span className="log-window">last 72h · {logs.length} lines</span></span>
         <span className="log-toggle">{open ? '▲' : '▼'}</span>
       </div>
       {open && (

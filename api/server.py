@@ -749,14 +749,21 @@ def features(_: str = Depends(verify)) -> dict[str, Any]:
 
 
 @app.get("/api/logs")
-def get_logs(_: str = Depends(verify), lines: int = 100) -> dict[str, Any]:
+def get_logs(_: str = Depends(verify), hours: int = 72) -> dict[str, Any]:
     from pathlib import Path
+    from datetime import datetime, timedelta
     log_file = Path(__file__).parent.parent / "logs" / "stox.log"
     if not log_file.exists():
         return {"lines": []}
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff_str = cutoff.strftime("%Y-%m-%d %H:%M:%S")
+    result = []
     with open(log_file) as f:
-        all_lines = f.readlines()
-    return {"lines": [l.rstrip() for l in all_lines[-lines:]]}
+        for line in f:
+            # Log lines start with "YYYY-MM-DD HH:MM:SS"; include if at or after cutoff
+            if line[:19] >= cutoff_str:
+                result.append(line.rstrip())
+    return {"lines": result}
 
 
 # ------------------------------------------------------------------ SPA
