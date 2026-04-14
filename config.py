@@ -32,6 +32,7 @@ class Config:
     PROFIT_WITHDRAWAL_ALERT_PCT: float = float(os.getenv("PROFIT_WITHDRAWAL_ALERT_PCT", "0.10"))
     MAX_POSITION_PCT: float = float(os.getenv("MAX_POSITION_PCT", "0.05"))   # max single position = 5% of equity
     MIN_POSITION_PCT: float = float(os.getenv("MIN_POSITION_PCT", "0.01"))   # don't enter if buying power < 1% of equity
+    MAX_OPEN_POSITIONS: int = int(os.getenv("MAX_OPEN_POSITIONS", "20"))     # max concurrent open positions
     STOP_LOSS_PCT: float = float(os.getenv("STOP_LOSS_PCT", "0.03"))
     TAKE_PROFIT_PCT: float = float(os.getenv("TAKE_PROFIT_PCT", "0.30"))   # emergency ceiling only; trailing stop is primary exit
     MAX_DAILY_LOSS_PCT: float = float(os.getenv("MAX_DAILY_LOSS_PCT", "0.05"))

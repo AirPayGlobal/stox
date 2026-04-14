@@ -146,6 +146,7 @@ def account(_: str = Depends(verify)) -> dict[str, Any]:
         equity = data.get("equity", 0)
         cash_balance = data.get("cash", 0)
         data["base_capital"] = base
+        data["max_open_positions"] = cfg.MAX_OPEN_POSITIONS
         data["unrealised_growth"] = equity - base
         # Deployable = what the bot actually uses (capped at base capital)
         data["deployable_capital"] = min(data.get("buying_power", 0), base)
