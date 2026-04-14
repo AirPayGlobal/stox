@@ -229,7 +229,11 @@ def positions(_: str = Depends(verify)) -> dict[str, Any]:
         from trading.alpaca_client import get_positions
         from trading.portfolio import Portfolio
         from analysis.earnings_calendar import days_to_earnings
-        result = get_positions()
+        import re as _re
+        result = {
+            sym: pos for sym, pos in get_positions().items()
+            if _re.match(r'^[A-Z]{1,5}$', sym)  # exclude options contracts / non-stock symbols
+        }
 
         port = _fresh_portfolio()
         for symbol, pos in result.items():

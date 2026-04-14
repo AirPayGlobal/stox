@@ -803,7 +803,22 @@ class TradingBot:
         for symbol, pos in open_positions.items():
             if self.portfolio.get_open_trade(symbol):
                 continue  # already tracked — nothing to do
+
+            # Skip options contracts and other non-stock instruments.
+            # Stock tickers are 1-5 uppercase letters. Options symbols contain
+            # digits mixed with letters (e.g. "436CVR021", "AAPL240119C00150000").
+            import re as _re
+            if not _re.match(r'^[A-Z]{1,5}$', symbol):
+                logger.debug(f"Skipping non-stock symbol in restore: {symbol}")
+                continue
+
             entry = pos["avg_entry"]
+
+            # Skip positions where Alpaca returned no entry price (options, etc.)
+            if not entry or entry <= 0:
+                logger.debug(f"Skipping zero-entry position in restore: {symbol}")
+                continue
+
             side  = "SHORT" if pos["side"] == "short" else "BUY"
             shares = int(abs(pos["qty"]))
             stop_dist = entry * Config.STOP_LOSS_PCT
