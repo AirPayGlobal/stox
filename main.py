@@ -321,7 +321,17 @@ class TradingBot:
             if sec:
                 _open_sector_counts[sec] = _open_sector_counts.get(sec, 0) + 1
 
+        # Hard cap: never exceed MAX_OPEN_POSITIONS total (open + pending)
+        total_open = len(open_positions) + len(self._pending_orders)
+        if total_open >= Config.MAX_OPEN_POSITIONS:
+            logger.info(
+                f"Position limit reached ({total_open}/{Config.MAX_OPEN_POSITIONS}) — skipping new entries"
+            )
+        entries_this_scan = 0
+
         for symbol, signal, score in buy_candidates:
+            if total_open + entries_this_scan >= Config.MAX_OPEN_POSITIONS:
+                break
             if not self.risk.has_buying_power(cash, equity):
                 break
 
@@ -448,6 +458,7 @@ class TradingBot:
                         )
                         self.risk.record_trade()
                         cash -= fill_price * shares
+                        entries_this_scan += 1
                     else:
                         # Order submitted but not yet filled — will be tracked by VWAP executor
                         # and reconciled next scan via _reconcile_pending_orders()
@@ -460,8 +471,10 @@ class TradingBot:
                             f"VWAP order submitted but pending fill: {symbol} "
                             f"{shares} shares | order={order_id}"
                         )
+                        entries_this_scan += 1
             else:
                 logger.info(f"[DRY RUN] Would place VWAP limit: BUY {shares} {symbol} @ ${price:.2f}")
+                entries_this_scan += 1
 
         # Log filter funnel summary for diagnostics
         if buy_candidates:
@@ -982,6 +995,29 @@ class TradingBot:
                                 logger.info(
                                     f"[DRY RUN] Would partial exit {action.shares_to_sell} {symbol}"
                                 )
+
+                        # Time-based exit: free up capital from stagnant positions.
+                        # If held > 14 days AND unrealized gain < 3%, close and redeploy.
+                        try:
+                            from datetime import datetime as _dt
+                            _opened = _dt.fromisoformat(trade.opened_at)
+                            _age_days = (_dt.utcnow() - _opened).days
+                            _gain_pct = (current_price / trade.entry_price) - 1
+                            if _age_days >= 14 and _gain_pct < 0.03:
+                                logger.info(
+                                    f"Stagnant exit: {symbol} held {_age_days}d "
+                                    f"gain={_gain_pct:.1%} < 3% — freeing capital"
+                                )
+                                if not self.dry_run:
+                                    if close_position(symbol):
+                                        self.portfolio.close_trade(
+                                            symbol, current_price, status="STAGNANT"
+                                        )
+                                else:
+                                    logger.info(f"[DRY RUN] Would stagnant-exit {symbol}")
+                                continue
+                        except Exception:
+                            pass
 
                         # Break-even stop: once the trade has been up BREAK_EVEN_TRIGGER_PCT
                         # or more, never let it close below entry price.
