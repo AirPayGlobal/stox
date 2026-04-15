@@ -132,6 +132,7 @@ class TradingBot:
         self.vwap_executor = VWAPExecutor()              # Upgrade 6
         self._last_ml_retrain_month: int = -1            # Upgrade 3: monthly retrain
         self._pending_orders: dict = {}                  # VWAP orders awaiting fill confirmation
+        self._pending_covers: set = set()               # symbols with in-flight cover orders (short exits)
 
         mode = "DRY RUN" if dry_run else Config.ALPACA_MODE.upper()
         logger.info(f"Bot initialised | mode={mode} | strategy={self.strategy.name}")
@@ -179,7 +180,10 @@ class TradingBot:
         # Fetching positions here so exits always have fresh data.
         open_positions = get_positions()
         pending_symbols = get_pending_symbols()
-        open_symbols = set(open_positions.keys()) | pending_symbols
+        # Include bot's own in-memory pending orders so a symbol isn't re-entered
+        # while its VWAP limit order is pending but not yet visible in Alpaca's API
+        _bot_pending = {meta["symbol"] for meta in self._pending_orders.values()}
+        open_symbols = set(open_positions.keys()) | pending_symbols | _bot_pending
         # Reconcile any VWAP limit orders that were pending from previous scans
         self._reconcile_pending_orders()
         self._check_exits(open_positions, equity)
@@ -800,9 +804,18 @@ class TradingBot:
         We reconstruct a minimal record from Alpaca's avg_entry_price so that
         all exit mechanisms work correctly even after a restart.
         """
+        # Clear pending_covers for positions that are gone from Alpaca (cover succeeded)
+        self._pending_covers -= set(open_positions.keys())
+
         for symbol, pos in open_positions.items():
             if self.portfolio.get_open_trade(symbol):
                 continue  # already tracked — nothing to do
+
+            # Skip symbols where we've already submitted a cover order — the order
+            # hasn't cleared Alpaca's position cache yet but is in flight.
+            if symbol in self._pending_covers:
+                logger.debug(f"Skipping restore for {symbol} — cover order already in flight")
+                continue
 
             # Skip options contracts and other non-stock instruments.
             # Stock tickers are 1-5 uppercase letters. Options symbols contain
@@ -882,6 +895,7 @@ class TradingBot:
                         )
                         if not self.dry_run:
                             if cover_short_order(symbol, qty):
+                                self._pending_covers.add(symbol)
                                 self.portfolio.close_trade(symbol, current_price, status="STOPPED")
                         else:
                             logger.info(f"[DRY RUN] Would cover short (stop) {symbol}")
@@ -896,6 +910,7 @@ class TradingBot:
                         )
                         if not self.dry_run:
                             if cover_short_order(symbol, qty):
+                                self._pending_covers.add(symbol)
                                 self.portfolio.close_trade(symbol, current_price, status="TOOK_PROFIT")
                         else:
                             logger.info(f"[DRY RUN] Would cover short (TP) {symbol}")
@@ -916,6 +931,7 @@ class TradingBot:
                         )
                         if not self.dry_run:
                             if cover_short_order(symbol, qty):
+                                self._pending_covers.add(symbol)
                                 self.portfolio.close_trade(symbol, current_price, status="TRAILING_STOP")
                         else:
                             logger.info(f"[DRY RUN] Would cover short (trailing) {symbol}")
@@ -927,6 +943,7 @@ class TradingBot:
                         logger.info(f"SHORT signal exit for {symbol} — BUY reversal (score={score})")
                         if not self.dry_run:
                             if cover_short_order(symbol, qty):
+                                self._pending_covers.add(symbol)
                                 exit_price = fetch_latest_price(symbol) or current_price
                                 self.portfolio.close_trade(symbol, exit_price, status="SIGNAL_EXIT")
                         else:
