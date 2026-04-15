@@ -212,7 +212,7 @@ def main() -> int:
             print(f"  ✗ Profit factor did not improve ({pf_before:.2f} → {pf_after:.2f})")
         print("\n  ❌ Metrics did not improve — reverting changes.")
         revert_changes()
-        return 1
+        return 0  # Not an error — just no improvement this week; git diff will show 0 changes
 
 
 if __name__ == "__main__":

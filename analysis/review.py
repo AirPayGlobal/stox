@@ -24,9 +24,8 @@ from utils.logger import get_logger
 
 logger = get_logger("review")
 
-PORTFOLIO_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs", "portfolio.json"
-)
+# Match the same path logic as trading/portfolio.py
+PORTFOLIO_FILE = os.environ.get("PORTFOLIO_FILE", "/data/portfolio.json")
 
 
 def load_portfolio() -> dict:
