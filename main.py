@@ -997,16 +997,17 @@ class TradingBot:
                                 )
 
                         # Time-based exit: free up capital from stagnant positions.
-                        # If held > 14 days AND unrealized gain < 3%, close and redeploy.
+                        # If held > 5 days AND unrealized gain < 2%, close and redeploy
+                        # into the strongest current signals.
                         try:
                             from datetime import datetime as _dt
                             _opened = _dt.fromisoformat(trade.opened_at)
                             _age_days = (_dt.utcnow() - _opened).days
                             _gain_pct = (current_price / trade.entry_price) - 1
-                            if _age_days >= 14 and _gain_pct < 0.03:
+                            if _age_days >= 5 and _gain_pct < 0.02:
                                 logger.info(
                                     f"Stagnant exit: {symbol} held {_age_days}d "
-                                    f"gain={_gain_pct:.1%} < 3% — freeing capital"
+                                    f"gain={_gain_pct:.1%} < 2% — freeing capital"
                                 )
                                 if not self.dry_run:
                                     if close_position(symbol):
