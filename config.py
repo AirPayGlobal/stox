@@ -144,5 +144,22 @@ class Config:
     DYNAMIC_UNIVERSE_ENABLED: bool = os.getenv("DYNAMIC_UNIVERSE_ENABLED", "true").lower() != "false"
     DYNAMIC_UNIVERSE_TOP_N: int    = int(os.getenv("DYNAMIC_UNIVERSE_TOP_N", "10"))  # max extra symbols per scan
 
+    # ------------------------------------------------------------------ StoxDaily (intraday)
+    DAILY_ALPACA_API_KEY: str = os.getenv("DAILY_ALPACA_API_KEY", "")
+    DAILY_ALPACA_API_SECRET: str = os.getenv("DAILY_ALPACA_API_SECRET", "")
+    DAILY_ALPACA_BASE_URL: str = "https://paper-api.alpaca.markets"
+
+    INTRADAY_ENABLED: bool = os.getenv("INTRADAY_ENABLED", "false").lower() == "true"
+    INTRADAY_SCAN_INTERVAL: int = int(os.getenv("INTRADAY_SCAN_INTERVAL", "60"))
+    INTRADAY_ORB_MINUTES: int = int(os.getenv("INTRADAY_ORB_MINUTES", "15"))
+    INTRADAY_MAX_POSITIONS: int = int(os.getenv("INTRADAY_MAX_POSITIONS", "5"))
+    INTRADAY_POSITION_PCT: float = float(os.getenv("INTRADAY_POSITION_PCT", "0.15"))
+    INTRADAY_STOP_PCT: float = float(os.getenv("INTRADAY_STOP_PCT", "0.005"))
+    INTRADAY_TARGET_MULT: float = float(os.getenv("INTRADAY_TARGET_MULT", "2.0"))
+    INTRADAY_CLOSE_BY_HOUR: int = int(os.getenv("INTRADAY_CLOSE_BY_HOUR", "15"))
+    INTRADAY_CLOSE_BY_MINUTE: int = int(os.getenv("INTRADAY_CLOSE_BY_MINUTE", "45"))
+    INTRADAY_CAPITAL: float = float(os.getenv("INTRADAY_CAPITAL", "25000"))
+    INTRADAY_MAX_DAILY_LOSS_PCT: float = float(os.getenv("INTRADAY_MAX_DAILY_LOSS_PCT", "0.02"))
+
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

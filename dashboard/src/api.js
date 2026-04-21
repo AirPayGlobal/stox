@@ -86,3 +86,26 @@ export async function fetchSettings() {
 export async function saveSettings(patch) {
   return client.patch('/api/settings', patch)
 }
+
+export async function fetchDailyAll() {
+  const [account, positions, trades, status] = await Promise.all([
+    client.get('/api/daily/account'),
+    client.get('/api/daily/positions'),
+    client.get('/api/daily/trades'),
+    client.get('/api/daily/status'),
+  ])
+  return {
+    account: account.data,
+    positions: positions.data,
+    trades: trades.data.trades,
+    status: status.data,
+  }
+}
+
+export async function startDailyBot(dryRun = false) {
+  return client.post(`/api/daily/start?dry_run=${dryRun}`)
+}
+
+export async function stopDailyBot() {
+  return client.post('/api/daily/stop')
+}

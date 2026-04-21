@@ -3,7 +3,7 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket, fetchReview, fetchMarketStatus, fetchSettings, saveSettings } from './api.js'
+import { startBot, stopBot, fetchLogs, fetchPendingTrades, approveTrade, declineTrade, fetchPairs, fetchAnalytics, fetchRegime, fetchFeatures, fetchMarket, fetchReview, fetchMarketStatus, fetchSettings, saveSettings, fetchDailyAll, startDailyBot, stopDailyBot } from './api.js'
 
 // ------------------------------------------------------------------ helpers
 
@@ -94,7 +94,7 @@ function MarketStatusBadge() {
   )
 }
 
-function Header({ account, botStatus, onToggle, toggleLoading, onLogout, onRefresh }) {
+function Header({ account, botStatus, onToggle, toggleLoading, onLogout, onRefresh, onSwitchToDaily }) {
   const running = botStatus?.running
   const mode = (botStatus?.mode || 'paper').toUpperCase()
   const isDry = botStatus?.dry_run
@@ -141,6 +141,11 @@ function Header({ account, botStatus, onToggle, toggleLoading, onLogout, onRefre
         <button className="btn btn-ghost" onClick={onLogout} title="Log out">
           ⏏
         </button>
+        {typeof onSwitchToDaily === 'function' && (
+          <button className="btn btn-ghost" onClick={onSwitchToDaily} title="Switch to StoxDaily (intraday)">
+            ⇄ Daily
+          </button>
+        )}
       </div>
     </header>
   )
@@ -2363,11 +2368,232 @@ function ReportsTab({ data }) {
   )
 }
 
+// ------------------------------------------------------------------ IntradayDashboard
+
+function IntradayStatsRow({ account, today }) {
+  const dailyPnl = account?.daily_pnl ?? 0
+  return (
+    <div className="stats-row">
+      <StatCard label="Equity" value={fmt$(account?.equity)} />
+      <StatCard label="Cash" value={fmt$(account?.cash)} />
+      <StatCard label="Buying Power" value={fmt$(account?.buying_power)} />
+      <StatCard
+        label="Today P&L"
+        value={fmt$(dailyPnl)}
+        valueClass={dailyPnl >= 0 ? 'green' : 'red'}
+      />
+      <StatCard label="Trades Today" value={today?.total_trades ?? '—'} />
+      <StatCard
+        label="Win Rate"
+        value={today?.total_trades ? fmtPct(today.win_rate) : '—'}
+      />
+    </div>
+  )
+}
+
+function IntradayPositionsTable({ positions }) {
+  const rows = Object.entries(positions || {})
+  if (!rows.length) return <div className="empty-state">No open positions</div>
+  return (
+    <div className="table-card">
+      <div className="table-title">Open Positions</div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Symbol</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Avg Entry</th>
+            <th>Market Value</th>
+            <th>Unrealized P&L</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(([sym, pos]) => (
+            <tr key={sym}>
+              <td className="symbol-cell">{sym}</td>
+              <td>{pos.side}</td>
+              <td>{pos.qty}</td>
+              <td>{fmt$(pos.avg_entry)}</td>
+              <td>{fmt$(pos.market_value)}</td>
+              <td><PnlCell value={pos.unrealized_pl} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function IntradayTradesTable({ trades }) {
+  if (!trades?.length) return <div className="empty-state">No trades today</div>
+  return (
+    <div className="table-card">
+      <div className="table-title">Today's Trades</div>
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Symbol</th>
+            <th>Strategy</th>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Entry</th>
+            <th>Exit</th>
+            <th>P&L</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trades.slice(0, 30).map((t, i) => (
+            <tr key={i}>
+              <td>{fmtDateTime(t.entry_time)}</td>
+              <td className="symbol-cell">{t.symbol}</td>
+              <td><span className="badge badge-strategy">{t.strategy}</span></td>
+              <td>{t.side}</td>
+              <td>{t.shares}</td>
+              <td>{fmt$(t.entry_price)}</td>
+              <td>{t.exit_price ? fmt$(t.exit_price) : '—'}</td>
+              <td>{t.status !== 'OPEN' ? <PnlCell value={t.pnl} /> : '—'}</td>
+              <td>
+                <span className={`badge ${t.status === 'OPEN' ? 'badge-open' : t.pnl > 0 ? 'badge-win' : 'badge-loss'}`}>
+                  {t.status}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function IntradayDashboard({ onLogout, onSwitchToSwing }) {
+  const [dailyData, setDailyData] = useState({ account: {}, positions: {}, trades: [], status: {} })
+  const [loading, setLoading] = useState(true)
+  const [toggleLoading, setToggleLoading] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  const refresh = async () => {
+    try {
+      const d = await fetchDailyAll()
+      setDailyData(d)
+    } catch (err) {
+      setMsg('Refresh failed: ' + (err.message || 'unknown error'))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    refresh()
+    const id = setInterval(refresh, 30_000)
+    return () => clearInterval(id)
+  }, [])
+
+  const handleToggle = async (dryRun = false) => {
+    setToggleLoading(true)
+    setMsg(null)
+    try {
+      const running = dailyData.status?.running
+      const res = running ? await stopDailyBot() : await startDailyBot(dryRun)
+      setMsg(res.data?.status)
+      await refresh()
+    } catch (err) {
+      setMsg(err.response?.data?.detail || err.message)
+    } finally {
+      setToggleLoading(false)
+    }
+  }
+
+  const { account, positions, trades, status } = dailyData
+  const running = status?.running
+
+  return (
+    <div className="dashboard">
+      <header className="header">
+        <div className="header-left">
+          <span className="logo-diamond">◆</span>
+          <span className="logo-text">STOX</span>
+          <span className="badge badge-paper" style={{ background: '#1a4a2e', color: '#3fb950' }}>DAILY</span>
+          {status?.dry_run && <span className="badge badge-dry">DRY RUN</span>}
+          <MarketStatusBadge />
+        </div>
+        <div className="header-right">
+          <button className="btn btn-ghost" onClick={onSwitchToSwing} title="Switch to StoxSwing">
+            ⇄ StoxSwing
+          </button>
+          <span className={`status-dot ${running ? 'dot-green' : 'dot-grey'}`} />
+          <span className="status-label">{running ? 'running' : 'stopped'}</span>
+          <button
+            className={`btn ${running ? 'btn-danger' : 'btn-primary'}`}
+            onClick={() => handleToggle(false)}
+            disabled={toggleLoading}
+          >
+            {toggleLoading ? '…' : running ? 'Stop Bot' : 'Start Bot'}
+          </button>
+          {!running && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => handleToggle(true)}
+              disabled={toggleLoading}
+              title="Dry run"
+            >
+              Dry Run
+            </button>
+          )}
+          <button className="btn btn-ghost" onClick={refresh} title="Refresh">↺</button>
+          <button className="btn btn-ghost" onClick={onLogout} title="Log out">⏏</button>
+        </div>
+      </header>
+
+      {msg && <div className="banner banner-info">{msg}</div>}
+
+      {/* Account mode banner */}
+      <div className="banner" style={{ background: '#0d2a1a', color: '#3fb950', borderColor: '#1a4a2e' }}>
+        StoxDaily — Intraday Day Trading &nbsp;·&nbsp;
+        Strategies: ORB · VWAP Scalp · Gap &amp; Go · 9/20 EMA &nbsp;·&nbsp;
+        EOD close at 3:45 PM ET
+      </div>
+
+      <IntradayStatsRow account={account} today={status?.today} />
+
+      <div className="tables-grid" style={{ marginTop: '1rem' }}>
+        <IntradayPositionsTable positions={positions} />
+        <IntradayTradesTable trades={trades} />
+      </div>
+
+      <footer className="footer">
+        StoxDaily &nbsp;·&nbsp; Auto-refreshes every 30 s &nbsp;·&nbsp; {new Date().toLocaleTimeString()}
+      </footer>
+    </div>
+  )
+}
+
+// ------------------------------------------------------------------ App-level account switcher
+
+function AppShell({ onLogout }) {
+  const [account, setAccount] = useState('swing') // 'swing' | 'daily'
+  return account === 'daily'
+    ? <IntradayDashboard onLogout={onLogout} onSwitchToSwing={() => setAccount('swing')} />
+    : <SwingShell onLogout={onLogout} onSwitchToDaily={() => setAccount('daily')} />
+}
+
+function SwingShell({ onLogout, onSwitchToDaily }) {
+  // Wraps the existing swing dashboard with a switcher button injected into the header
+  return <SwingDashboardWrapper onLogout={onLogout} onSwitchToDaily={onSwitchToDaily} />
+}
+
 export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
   const { account, positions, trades, summary, equityCurve, botStatus } = data
   const [toggleLoading, setToggleLoading] = useState(false)
   const [botMsg, setBotMsg] = useState(null)
   const [activeTab, setActiveTab] = useState('overview')
+  const [showDaily, setShowDaily] = useState(false)
+
+  if (showDaily) {
+    return <IntradayDashboard onLogout={onLogout} onSwitchToSwing={() => setShowDaily(false)} />
+  }
 
   const handleToggle = async (dryRun = false) => {
     setToggleLoading(true)
@@ -2394,6 +2620,7 @@ export default function Dashboard({ data, onRefresh, onLogout, refreshError }) {
         toggleLoading={toggleLoading}
         onLogout={onLogout}
         onRefresh={onRefresh}
+        onSwitchToDaily={() => setShowDaily(true)}
       />
 
       {(botMsg || refreshError || (botStatus?.status === 'error' && botStatus?.error)) && (

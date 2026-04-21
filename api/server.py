@@ -771,6 +771,64 @@ def get_logs(_: str = Depends(verify), hours: int = 72) -> dict[str, Any]:
     return {"lines": result}
 
 
+# ------------------------------------------------------------------ StoxDaily (intraday bot)
+
+def _intraday_bot():
+    from intraday.bot import intraday_bot as _ib
+    return _ib
+
+
+@app.get("/api/daily/account")
+def daily_account(_: str = Depends(verify)) -> dict[str, Any]:
+    try:
+        from intraday.client import get_account as _get_account
+        return _get_account()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/daily/positions")
+def daily_positions(_: str = Depends(verify)) -> dict[str, Any]:
+    try:
+        from intraday.client import get_positions as _get_positions
+        return _get_positions()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/daily/trades")
+def daily_trades(_: str = Depends(verify)) -> dict[str, Any]:
+    try:
+        bot = _intraday_bot()
+        return {"trades": bot.portfolio.all_trades_dict()}
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/daily/status")
+def daily_status(_: str = Depends(verify)) -> dict[str, Any]:
+    try:
+        return _intraday_bot().get_status()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/daily/start")
+def daily_start(dry_run: bool = False, _: str = Depends(verify)) -> dict[str, Any]:
+    try:
+        return _intraday_bot().start(dry_run=dry_run)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@app.post("/api/daily/stop")
+def daily_stop(_: str = Depends(verify)) -> dict[str, Any]:
+    try:
+        return _intraday_bot().stop()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ------------------------------------------------------------------ SPA
 
 _DIST = Path(__file__).parent.parent / "dashboard" / "dist"
