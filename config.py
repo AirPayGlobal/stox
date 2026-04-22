@@ -165,8 +165,8 @@ class Config:
     APEX_HARD_STOP_PCT: float = float(os.getenv("APEX_HARD_STOP_PCT", "0.02"))           # 2% hard stop from entry
     APEX_TARGET1_PCT: float = float(os.getenv("APEX_TARGET1_PCT", "0.03"))                # +3% take-profit target 1
     APEX_TARGET2_PCT: float = float(os.getenv("APEX_TARGET2_PCT", "0.05"))                # +5% take-profit target 2
-    APEX_MIN_CAS: float = float(os.getenv("APEX_MIN_CAS", "70.0"))                        # minimum CAS to enter
-    APEX_STRONG_BUY_CAS: float = float(os.getenv("APEX_STRONG_BUY_CAS", "85.0"))         # strong buy threshold
+    APEX_MIN_CAS: float = float(os.getenv("APEX_MIN_CAS", "58.0"))                        # minimum CAS to enter (calibrated for available data — no options flow)
+    APEX_STRONG_BUY_CAS: float = float(os.getenv("APEX_STRONG_BUY_CAS", "75.0"))         # strong buy threshold
     APEX_STRONG_BUY_SIZE_PCT: float = float(os.getenv("APEX_STRONG_BUY_SIZE_PCT", "0.04"))  # 4% NAV for strong buy
     APEX_BUY_SIZE_PCT: float = float(os.getenv("APEX_BUY_SIZE_PCT", "0.025"))             # 2.5% NAV for standard buy
     APEX_MAX_GROSS_EXPOSURE: float = float(os.getenv("APEX_MAX_GROSS_EXPOSURE", "0.15"))  # 15% NAV max total exposure

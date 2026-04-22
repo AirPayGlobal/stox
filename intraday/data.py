@@ -283,12 +283,22 @@ def fetch_snapshots_batch(symbols: list[str]) -> dict[str, dict]:
                 prev_close = float(getattr(prev_bar, "close", None) or 0) if prev_bar else 0.0
                 trade = getattr(snap, "latest_trade", None)
                 latest_price = float(getattr(trade, "price", None) or 0) if trade else 0.0
+                # Daily range % from today's bar — used as the correct ATR proxy (APEX spec: daily ATR >2%)
+                daily_bar = getattr(snap, "daily_bar", None)
+                if daily_bar:
+                    d_high = float(getattr(daily_bar, "high", None) or 0)
+                    d_low  = float(getattr(daily_bar, "low", None) or 0)
+                    d_open = float(getattr(daily_bar, "open", None) or 0)
+                    daily_range_pct = (d_high - d_low) / d_open if d_open > 0 and d_high > d_low else 0.0
+                else:
+                    daily_range_pct = 0.0
                 result[sym] = {
                     "spread_pct": spread_pct,
                     "prev_close": prev_close,
                     "latest_price": latest_price,
                     "bid": bid,
                     "ask": ask,
+                    "daily_range_pct": daily_range_pct,
                 }
             except Exception:
                 continue

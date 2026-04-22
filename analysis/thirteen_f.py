@@ -13,8 +13,10 @@ SEC EDGAR public API (no key required):
 
 Hedge funds tracked
 -------------------
-  Berkshire Hathaway, Bridgewater, Renaissance Tech, Citadel,
-  Two Sigma, Tiger Global, Pershing Square, Appaloosa
+  Berkshire Hathaway, Renaissance Tech, Two Sigma, Citadel,
+  Tiger Global, Pershing Square, Appaloosa, Viking Global,
+  Palantir Technologies (strategic equity investor),
+  Coatue Management (tech-focused hedge fund)
 
 Scoring
 -------
@@ -56,6 +58,9 @@ HEDGE_FUNDS: dict[str, str] = {
     "Pershing Square":     "0001336528",
     "Appaloosa":           "0001006438",
     "Viking Global":       "0001103804",
+    # Tech-focused additions
+    "Palantir":            "0001321655",  # strategic equity investor; files 13F on public holdings
+    "Coatue Management":   "0001135730",  # tech-specialist hedge fund (~$40B AUM)
 }
 
 _HEADERS = {"User-Agent": "STOX-Bot research@stox.io"}  # SEC requires User-Agent
@@ -88,6 +93,17 @@ _NAME_TO_TICKER: dict[str, str] = {
     "RAYTHEON":      "RTX",   "QUALCOMM":      "QCOM",
     "AMGEN":         "AMGN",  "UNITED PARCEL": "UPS",
     "STARBUCKS":     "SBUX",  "GOOGLE":        "GOOGL",
+    # Tech stocks prominent in Palantir / Coatue portfolios
+    "TAIWAN SEMI":   "TSM",   "ARISTA":        "ANET",
+    "ARM HOLDINGS":  "ARM",   "SUPER MICRO":   "SMCI",
+    "CLOUDFLARE":    "NET",   "SNOWFLAKE":     "SNOW",
+    "DATADOG":       "DDOG",  "CROWDSTRIKE":   "CRWD",
+    "PALANTIR":      "PLTR",  "MARVELL":       "MRVL",
+    "PALO ALTO":     "PANW",  "FORTINET":      "FTNT",
+    "SERVICENOW":    "NOW",   "WORKDAY":       "WDAY",
+    "MONGODB":       "MDB",   "COINBASE":      "COIN",
+    "BLOCK INC":     "SQ",    "PAYPAL":        "PYPL",
+    "UBER TECH":     "UBER",  "DELL TECH":     "DELL",
 }
 
 

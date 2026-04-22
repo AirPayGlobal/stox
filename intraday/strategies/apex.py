@@ -160,77 +160,78 @@ def generate_signal(
         if close <= 0 or vwap <= 0:
             return None
 
-        # Hard filter: sufficient ATR% — stock must have >2% daily range potential
-        if atr_pct < min_atr_pct:
-            logger.debug("APEX %s: ATR%%=%.3f below min %.3f — skipping", symbol, atr_pct, min_atr_pct)
-            return None
-
         # Volume metrics (20-bar average)
         avg_volume = float(df["volume"].tail(20).mean()) if len(df) >= 20 else float(df["volume"].mean())
         if avg_volume <= 0:
             avg_volume = 1.0
         volume_ratio = volume / avg_volume
 
-        # Entry trigger: 15-min close above VWAP with volume > 1.5x avg
+        # ---- Daily range filter (APEX spec: stock must have >2% daily range potential) ----
+        # Primary: use today's actual daily range from snapshot (accurate).
+        # Fallback: scale 5-min ATR up to daily equivalent (5-min × √78 ≈ ×8.8).
+        daily_range_pct = snapshot.get("daily_range_pct", 0.0) if snapshot else 0.0
+        if daily_range_pct <= 0:
+            daily_range_pct = atr_pct * 8.8   # rough daily ATR proxy from intraday bars
+        if daily_range_pct < min_atr_pct:
+            logger.debug(
+                "APEX %s: daily_range=%.2f%% < min %.2f%% — skipping (insufficient range)",
+                symbol, daily_range_pct * 100, min_atr_pct * 100,
+            )
+            return None
+
+        # Entry trigger: price above VWAP with volume > 1.5x avg
         if close < vwap:
             return None
         if volume_ratio < 1.5:
             return None
 
-        # ------------------------------------------------------------------ Factor A: Catalyst (30%)
-        # Sources: gap size, volume spike, news sentiment classification
-        factor_a = 0.0
+        # ------------------------------------------------------------------ Factor A: Catalyst (20%)
+        # Base credit for elevated volume (institutional interest proxy), plus gap and news bonus.
+        # Weight reduced from 30% to 20% since we lack options flow and real-time catalyst data.
+        factor_a = min(35.0, (volume_ratio - 1.0) * 23.0)   # 1.5x→11.5, 2x→23, 3x→35
         gap_pct = 0.0
         if prev_close > 0:
             gap_pct = (float(df.iloc[0]["open"]) - prev_close) / prev_close
             if gap_pct >= 0.025:
-                factor_a = min(70.0, gap_pct * 1600.0)     # 2.5%→40pts, 5%→80pts (capped)
+                factor_a = min(100.0, factor_a + gap_pct * 1600.0)  # 2.5%→+40, 5%→+80
             elif gap_pct >= 0.01:
-                factor_a = gap_pct * 1200.0
-        # Volume spike = institutional accumulation proxy
-        if volume_ratio >= 3.0:
-            factor_a = min(100.0, factor_a + 25.0)
-        elif volume_ratio >= 2.0:
-            factor_a = min(100.0, factor_a + 12.0)
-        elif volume_ratio >= 1.5:
-            factor_a = min(100.0, factor_a + 5.0)
-        # News classification overlay
+                factor_a = min(100.0, factor_a + gap_pct * 1000.0)
         if news_class == "positive_catalyst":
-            factor_a = min(100.0, factor_a + 20.0)         # confirmed catalyst → boost
+            factor_a = min(100.0, factor_a + 25.0)
         elif news_class == "earnings_uncertainty":
-            factor_a *= 0.60                                # pre-earnings → reduce conviction
+            factor_a *= 0.60
 
-        # ------------------------------------------------------------------ Factor B: Pre-market momentum (25%)
-        vwap_dev = (close - vwap) / vwap  # positive = above VWAP
+        # ------------------------------------------------------------------ Factor B: Momentum (30%)
+        # Weight increased from 25% to 30% — VWAP + EMA momentum is reliably measurable.
+        vwap_dev = (close - vwap) / vwap
         factor_b = 0.0
         if vwap_dev > 0:
-            factor_b += min(40.0, vwap_dev * 2500.0)       # 1% above VWAP → 25pts
+            factor_b += min(45.0, vwap_dev * 3000.0)        # 0.5%→15, 1%→30, 1.5%→45
         if close > ema9:
-            factor_b += 20.0                                # price above short-term EMA
-        # Consecutive bullish candles in last 4 bars = directional momentum
+            factor_b += 25.0
         recent = df.tail(4)
         up_bars = sum(1 for _, row in recent.iterrows() if float(row["close"]) > float(row["open"]))
-        factor_b += up_bars * 10.0
+        factor_b += up_bars * 7.5                            # 4/4 up bars → +30
         factor_b = min(100.0, factor_b)
 
-        # ------------------------------------------------------------------ Factor C: Technical structure (35%)
+        # ------------------------------------------------------------------ Factor C: Technical (40%)
+        # Weight increased from 35% to 40% — compensates for missing options-flow factor.
         factor_c = 0.0
-        # RSI 55-75: momentum zone, not overbought — peak score at RSI=65
+        # RSI 55-75 momentum zone; peak score at RSI=65
         if 55.0 <= rsi_val <= 75.0:
-            rsi_score = 35.0 * (1.0 - abs(rsi_val - 65.0) / 10.0)
-            factor_c += rsi_score
+            factor_c += 35.0 * (1.0 - abs(rsi_val - 65.0) / 10.0)
         elif 45.0 <= rsi_val < 55.0:
-            factor_c += 8.0                                 # sub-optimal but tradeable
-        # SMA breakout: above 20-bar and 50-bar SMA
+            factor_c += 10.0
+        # SMA trend alignment
         if close > sma20:
-            factor_c += 12.0
+            factor_c += 15.0
         if close > sma50:
-            factor_c += 8.0
-        # Volume confirmation (beyond the entry filter threshold)
-        factor_c += min(18.0, (volume_ratio - 1.5) * 9.0)
-        # ATR% bonus — bigger range = better trade opportunity
-        factor_c += min(10.0, max(0.0, (atr_pct - min_atr_pct) * 300.0))
-        # Closing near session high = price strength
+            factor_c += 10.0
+        # Volume quality above entry-filter floor
+        factor_c += min(20.0, (volume_ratio - 1.5) * 10.0)
+        # Daily range bonus (bigger range = more opportunity)
+        factor_c += min(10.0, max(0.0, (daily_range_pct - min_atr_pct) * 200.0))
+        # Closing near session high = sustained buying pressure
         if session_high > 0 and close >= session_high * 0.97:
             factor_c += 10.0
         factor_c = min(100.0, factor_c)
@@ -259,10 +260,12 @@ def generate_signal(
                 pass
 
         # ------------------------------------------------------------------ Composite Alpha Score
+        # Weights: A=0.20 (catalyst proxy, missing options data), B=0.30 (momentum),
+        #          C=0.40 (technical structure, compensates for missing options factor), D=0.10 (regime)
         cas = (
-            factor_a * 0.30
-            + factor_b * 0.25
-            + factor_c * 0.35
+            factor_a * 0.20
+            + factor_b * 0.30
+            + factor_c * 0.40
             + factor_d * 0.10
         )
 
