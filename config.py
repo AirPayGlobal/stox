@@ -180,6 +180,9 @@ class Config:
     APEX_TIME_STOP_MINUTE: int = int(os.getenv("APEX_TIME_STOP_MINUTE", "30"))           # this time (12:30 PM ET)
     APEX_TIME_STOP_MIN_GAIN: float = float(os.getenv("APEX_TIME_STOP_MIN_GAIN", "0.005"))  # must be up 0.5% to hold past noon
     APEX_ENTRY_SKIP_OPEN_MIN: int = int(os.getenv("APEX_ENTRY_SKIP_OPEN_MIN", "5"))      # skip first N minutes after open
+    APEX_MAX_SPREAD_PCT: float = float(os.getenv("APEX_MAX_SPREAD_PCT", "0.0015"))        # max bid/ask spread (0.15%) — reject illiquid entries
+    APEX_NEWS_CACHE_MINUTES: int = int(os.getenv("APEX_NEWS_CACHE_MINUTES", "15"))        # re-fetch news every N minutes
+    APEX_NEWS_HOURS_LOOKBACK: int = int(os.getenv("APEX_NEWS_HOURS_LOOKBACK", "24"))      # scan last N hours of news
 
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

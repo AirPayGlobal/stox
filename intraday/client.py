@@ -17,6 +17,11 @@ from alpaca.trading.requests import (
 )
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderClass
 from alpaca.data import StockHistoricalDataClient
+try:
+    from alpaca.data.historical import NewsClient as _NewsClient
+    _NEWS_AVAILABLE = True
+except ImportError:
+    _NEWS_AVAILABLE = False
 
 from config import Config
 from utils.logger import get_logger
@@ -27,6 +32,7 @@ _ET = timezone(timedelta(hours=-4))  # EDT; good enough for trading hours (handl
 
 _trading_client: Optional[TradingClient] = None
 _data_client: Optional[StockHistoricalDataClient] = None
+_news_client = None
 _lock = threading.Lock()
 
 
@@ -55,6 +61,24 @@ def get_data_client() -> StockHistoricalDataClient:
                 secret_key=Config.DAILY_ALPACA_API_SECRET,
             )
     return _data_client
+
+
+def get_news_client():
+    """Return a NewsClient singleton, or None if the package doesn't support it."""
+    global _news_client
+    if not _NEWS_AVAILABLE:
+        return None
+    with _lock:
+        if _news_client is None:
+            try:
+                _news_client = _NewsClient(
+                    api_key=Config.DAILY_ALPACA_API_KEY,
+                    secret_key=Config.DAILY_ALPACA_API_SECRET,
+                )
+            except Exception as exc:
+                logger.warning("NewsClient init failed: %s", exc)
+                return None
+    return _news_client
 
 
 def get_account() -> dict:

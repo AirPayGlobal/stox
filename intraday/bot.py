@@ -29,7 +29,7 @@ from intraday.client import (
     place_bracket_order,
     is_market_open,
 )
-from intraday.data import fetch_bars_batch, get_prev_close
+from intraday.data import fetch_bars_batch, get_prev_close, fetch_snapshots_batch, fetch_news_batch
 from intraday.indicators import add_intraday_indicators
 from intraday.portfolio import IntradayPortfolio
 from intraday.risk import IntradayRiskManager
@@ -52,6 +52,9 @@ class IntradayBot:
         self._dry_run = False
         self._status: dict = {"running": False, "dry_run": False, "last_scan": None, "error": None}
         self._prev_closes: dict[str, float] = {}
+        self._snapshots: dict[str, dict] = {}          # refreshed every scan
+        self._news_cache: dict[str, list[str]] = {}    # refreshed every APEX_NEWS_CACHE_MINUTES
+        self._news_cache_time: Optional[datetime] = None
 
     # ------------------------------------------------------------------ Control
 
@@ -109,6 +112,9 @@ class IntradayBot:
             if not self.risk.is_market_hours():
                 self.risk.reset()
                 self._prev_closes = {}
+                self._snapshots = {}
+                self._news_cache = {}
+                self._news_cache_time = None
             return
 
         acct = get_account()
@@ -242,12 +248,28 @@ class IntradayBot:
         if not self.risk.can_open_position(open_count, equity):
             return
 
-        # Pre-fetch previous closes once per session
-        if not self._prev_closes:
-            self._prev_closes = {
-                sym: get_prev_close(sym)
-                for sym in APEX_UNIVERSE[:25]
-            }
+        # ---- Snapshots: fetch every scan (provides spread filter + prev_close) ----
+        self._snapshots = fetch_snapshots_batch(APEX_UNIVERSE)
+        # Populate prev_closes from snapshot data (faster than individual API calls)
+        for sym, snap in self._snapshots.items():
+            pc = snap.get("prev_close", 0.0)
+            if pc > 0:
+                self._prev_closes[sym] = pc
+        # Fall back to individual calls for any symbols not in snapshots
+        for sym in APEX_UNIVERSE:
+            if sym not in self._prev_closes:
+                self._prev_closes[sym] = get_prev_close(sym)
+
+        # ---- News: refresh on TTL (default every 15 minutes) ----
+        now = datetime.utcnow()
+        news_stale = (
+            self._news_cache_time is None
+            or (now - self._news_cache_time).total_seconds() > Config.APEX_NEWS_CACHE_MINUTES * 60
+        )
+        if news_stale:
+            self._news_cache = fetch_news_batch(APEX_UNIVERSE, hours=Config.APEX_NEWS_HOURS_LOOKBACK)
+            self._news_cache_time = now
+            logger.debug("News cache refreshed for %d symbols", len(self._news_cache))
 
         # QQQ bars for macro regime factor
         qqq_df = bars.get("QQQ")
@@ -274,6 +296,8 @@ class IntradayBot:
                     df=df,
                     prev_close=self._prev_closes.get(symbol, 0.0),
                     qqq_df=qqq_df,
+                    snapshot=self._snapshots.get(symbol),
+                    news_headlines=self._news_cache.get(symbol),
                 )
                 if sig:
                     candidates.append((sig.cas_score, sig))

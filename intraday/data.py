@@ -9,8 +9,19 @@ import pandas as pd
 
 from alpaca.data.requests import StockBarsRequest
 from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+try:
+    from alpaca.data.requests import StockSnapshotRequest
+    _SNAPSHOT_AVAILABLE = True
+except ImportError:
+    _SNAPSHOT_AVAILABLE = False
+try:
+    from alpaca.data.requests import NewsRequest
+    _NEWS_REQUEST_AVAILABLE = True
+except ImportError:
+    _NEWS_REQUEST_AVAILABLE = False
 
-from intraday.client import get_data_client
+from config import Config
+from intraday.client import get_data_client, get_news_client
 from utils.logger import get_logger
 
 logger = get_logger("intraday.data")
@@ -241,3 +252,95 @@ def get_prev_close(symbol: str) -> float:
     except Exception as exc:
         logger.warning("get_prev_close(%s) failed: %s", symbol, exc)
         return 0.0
+
+
+def fetch_snapshots_batch(symbols: list[str]) -> dict[str, dict]:
+    """
+    Fetch a consolidated snapshot (latest quote, trade, daily bar, prev-day bar) for
+    each symbol in one API call.
+
+    Returns dict[symbol, dict] with keys:
+      spread_pct   — bid/ask spread as fraction of mid price
+      prev_close   — previous session's closing price (replaces get_prev_close calls)
+      latest_price — most recent trade price
+      bid, ask     — latest quote prices
+    Returns {} on failure; individual symbols silently excluded on parse errors.
+    """
+    if not _SNAPSHOT_AVAILABLE or not symbols:
+        return {}
+    result: dict[str, dict] = {}
+    try:
+        client = get_data_client()
+        req = StockSnapshotRequest(symbol_or_symbols=symbols)
+        snaps = client.get_stock_snapshot(req)
+        for sym, snap in snaps.items():
+            try:
+                bid = float(getattr(snap.latest_quote, "bid_price", None) or 0)
+                ask = float(getattr(snap.latest_quote, "ask_price", None) or 0)
+                mid = (bid + ask) / 2.0 if bid > 0 and ask > 0 else 0.0
+                spread_pct = (ask - bid) / mid if mid > 0 else 0.0
+                prev_bar = getattr(snap, "prev_daily_bar", None)
+                prev_close = float(getattr(prev_bar, "close", None) or 0) if prev_bar else 0.0
+                trade = getattr(snap, "latest_trade", None)
+                latest_price = float(getattr(trade, "price", None) or 0) if trade else 0.0
+                result[sym] = {
+                    "spread_pct": spread_pct,
+                    "prev_close": prev_close,
+                    "latest_price": latest_price,
+                    "bid": bid,
+                    "ask": ask,
+                }
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.warning("fetch_snapshots_batch failed: %s", exc)
+    return result
+
+
+def fetch_news_batch(
+    symbols: list[str],
+    hours: int = 24,
+) -> dict[str, list[str]]:
+    """
+    Fetch recent news headlines + summaries for a list of symbols.
+
+    Returns dict[symbol, list[text]] where each text is
+    "headline summary" concatenated. Returns empty lists on failure.
+    Batches requests in groups of 20 to avoid URL-length limits.
+    """
+    if not _NEWS_REQUEST_AVAILABLE or not symbols:
+        return {sym: [] for sym in symbols}
+
+    result: dict[str, list[str]] = {sym: [] for sym in symbols}
+    news_client = get_news_client()
+    if news_client is None:
+        return result
+
+    start = datetime.now(tz=timezone.utc) - timedelta(hours=hours)
+
+    for i in range(0, len(symbols), 20):
+        batch = symbols[i : i + 20]
+        try:
+            req = NewsRequest(symbols=batch, start=start, limit=50)
+            response = news_client.get_news(req)
+            # alpaca-py may return a NewsSet (iterable) or object with .news attr
+            articles = getattr(response, "news", None)
+            if articles is None:
+                try:
+                    articles = list(response)
+                except Exception:
+                    articles = []
+            for article in articles:
+                headline = getattr(article, "headline", "") or ""
+                summary = getattr(article, "summary", "") or ""
+                text = f"{headline} {summary}".strip()
+                if not text:
+                    continue
+                article_syms = getattr(article, "symbols", None) or []
+                for sym in article_syms:
+                    if sym in result:
+                        result[sym].append(text)
+        except Exception as exc:
+            logger.debug("fetch_news_batch (symbols %d-%d) failed: %s", i, i + 20, exc)
+
+    return result
