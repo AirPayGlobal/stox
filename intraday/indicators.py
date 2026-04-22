@@ -74,10 +74,15 @@ def _atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(span=period, adjust=False).mean()
 
 
+def sma(series: pd.Series, period: int) -> pd.Series:
+    """Simple moving average."""
+    return series.rolling(window=period, min_periods=1).mean()
+
+
 def add_intraday_indicators(df: pd.DataFrame) -> pd.DataFrame:
     """
     Add derived columns to the intraday bar DataFrame:
-      vwap, ema9, ema20, rsi, atr, session_high, session_low
+      vwap, ema9, ema20, sma20, sma50, rsi, atr, atr_pct, session_high, session_low
 
     Returns a copy with the new columns appended.
     """
@@ -87,8 +92,11 @@ def add_intraday_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["vwap"] = session_vwap(out)
     out["ema9"] = ema(out["close"], 9)
     out["ema20"] = ema(out["close"], 20)
+    out["sma20"] = sma(out["close"], 20)
+    out["sma50"] = sma(out["close"], 50)
     out["rsi"] = rsi(out["close"], 14)
     out["atr"] = _atr(out, 14)
+    out["atr_pct"] = out["atr"] / out["close"].replace(0, np.nan)
     out["session_high"] = out["high"].cummax()
     out["session_low"] = out["low"].cummin()
     return out

@@ -1,5 +1,8 @@
 """
-Intraday trading universe — liquid, high-volume names suited for day trading.
+APEX v4.2 intraday universe — tech and tech-adjacent stocks.
+
+Criteria: NYSE/NASDAQ/CBOE, GICS sector 45 + tech-adjacent, $500M+ market cap,
+ADV > $50M, price $5-$2000. No Chinese ADRs, no SPACs, no leveraged ETFs.
 """
 from __future__ import annotations
 
@@ -7,45 +10,43 @@ from utils.logger import get_logger
 
 logger = get_logger("intraday.universe")
 
-# Core intraday universe: ETFs + mega/large-caps with tight spreads
-INTRADAY_UNIVERSE: list[str] = [
-    # Index ETFs
-    "SPY", "QQQ", "IWM", "DIA",
-    # Sector ETFs
-    "XLK", "XLF", "XLE", "XLV", "XLY",
+# QQQ is used for macro regime scoring — not traded directly
+REGIME_REFERENCE = ["QQQ", "SPY"]
+
+# Core APEX trading universe — tech and tech-adjacent, long-only
+APEX_UNIVERSE: list[str] = [
     # Mega-cap tech
     "AAPL", "MSFT", "NVDA", "GOOGL", "META", "AMZN", "TSLA",
-    # Semis
-    "AMD", "INTC", "AVGO", "QCOM", "MU",
-    # Financials
-    "JPM", "BAC", "GS", "MS", "C",
-    # Consumer / Retail
-    "AMZN", "HD", "WMT", "COST", "NKE",
-    # Energy
-    "XOM", "CVX", "OXY",
-    # Biotech / Healthcare
-    "UNH", "JNJ", "PFE", "MRNA",
-    # Leveraged ETFs for range expansion
-    "SQQQ", "TQQQ",
+    # Semiconductors
+    "AMD", "INTC", "AVGO", "QCOM", "MU", "AMAT", "LRCX", "KLAC",
+    "MRVL", "TXN", "ADI", "MCHP", "ON", "NXPI", "SWKS",
+    # Software / Cloud / SaaS
+    "CRM", "ORCL", "ADBE", "NOW", "WDAY", "SNOW", "PLTR", "DDOG",
+    "ZS", "CRWD", "NET", "OKTA", "HUBS", "TEAM", "MDB",
+    # AI / Infrastructure
+    "SMCI", "ARM", "ANET", "DELL", "HPE",
+    # Fintech
+    "V", "MA", "PYPL", "SQ", "COIN", "FI", "FISV",
+    # Cybersecurity
+    "PANW", "FTNT", "CYBR",
+    # Enterprise / Hardware
+    "CSCO", "ACN", "IBM",
+    # Consumer / Mobility tech
+    "SNAP", "RBLX", "UBER", "LYFT",
 ]
-# Remove any duplicates while preserving order
-_seen: set = set()
-_deduped = []
-for _s in INTRADAY_UNIVERSE:
-    if _s not in _seen:
-        _seen.add(_s)
-        _deduped.append(_s)
-INTRADAY_UNIVERSE = _deduped
+
+# Backwards-compat alias used by existing bot imports
+INTRADAY_UNIVERSE: list[str] = APEX_UNIVERSE
 
 
-def get_gap_stocks(prev_closes: dict[str, float], current_opens: dict[str, float], min_gap_pct: float = 0.02) -> list[str]:
-    """
-    Return symbols from INTRADAY_UNIVERSE that gapped by at least min_gap_pct.
-
-    prev_closes / current_opens: {symbol: price} dicts.
-    """
+def get_gap_stocks(
+    prev_closes: dict[str, float],
+    current_opens: dict[str, float],
+    min_gap_pct: float = 0.025,
+) -> list[str]:
+    """Return symbols that gapped by at least min_gap_pct (default 2.5% per APEX spec)."""
     gappers = []
-    for sym in INTRADAY_UNIVERSE:
+    for sym in APEX_UNIVERSE:
         prev = prev_closes.get(sym, 0.0)
         curr = current_opens.get(sym, 0.0)
         if prev <= 0 or curr <= 0:
@@ -58,11 +59,7 @@ def get_gap_stocks(prev_closes: dict[str, float], current_opens: dict[str, float
 
 
 def get_high_volume_movers(bars_by_symbol: dict, volume_mult: float = 2.0) -> list[str]:
-    """
-    Return symbols whose most-recent bar volume exceeds volume_mult × their 20-bar average.
-
-    bars_by_symbol: {symbol: pd.DataFrame} where each df has a 'volume' column.
-    """
+    """Return symbols whose most-recent bar volume exceeds volume_mult × their 20-bar average."""
     movers = []
     for sym, df in bars_by_symbol.items():
         if df is None or df.empty or len(df) < 5:

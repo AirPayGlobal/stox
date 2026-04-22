@@ -157,9 +157,29 @@ class Config:
     INTRADAY_STOP_PCT: float = float(os.getenv("INTRADAY_STOP_PCT", "0.005"))
     INTRADAY_TARGET_MULT: float = float(os.getenv("INTRADAY_TARGET_MULT", "2.0"))
     INTRADAY_CLOSE_BY_HOUR: int = int(os.getenv("INTRADAY_CLOSE_BY_HOUR", "15"))
-    INTRADAY_CLOSE_BY_MINUTE: int = int(os.getenv("INTRADAY_CLOSE_BY_MINUTE", "45"))
+    INTRADAY_CLOSE_BY_MINUTE: int = int(os.getenv("INTRADAY_CLOSE_BY_MINUTE", "55"))  # APEX: 3:55 PM hard close
     INTRADAY_CAPITAL: float = float(os.getenv("INTRADAY_CAPITAL", "25000"))
-    INTRADAY_MAX_DAILY_LOSS_PCT: float = float(os.getenv("INTRADAY_MAX_DAILY_LOSS_PCT", "0.02"))
+    INTRADAY_MAX_DAILY_LOSS_PCT: float = float(os.getenv("INTRADAY_MAX_DAILY_LOSS_PCT", "0.015"))  # APEX: 1.5% NAV
+
+    # APEX v4.2 — Composite Alpha Score engine parameters
+    APEX_HARD_STOP_PCT: float = float(os.getenv("APEX_HARD_STOP_PCT", "0.02"))           # 2% hard stop from entry
+    APEX_TARGET1_PCT: float = float(os.getenv("APEX_TARGET1_PCT", "0.03"))                # +3% take-profit target 1
+    APEX_TARGET2_PCT: float = float(os.getenv("APEX_TARGET2_PCT", "0.05"))                # +5% take-profit target 2
+    APEX_MIN_CAS: float = float(os.getenv("APEX_MIN_CAS", "70.0"))                        # minimum CAS to enter
+    APEX_STRONG_BUY_CAS: float = float(os.getenv("APEX_STRONG_BUY_CAS", "85.0"))         # strong buy threshold
+    APEX_STRONG_BUY_SIZE_PCT: float = float(os.getenv("APEX_STRONG_BUY_SIZE_PCT", "0.04"))  # 4% NAV for strong buy
+    APEX_BUY_SIZE_PCT: float = float(os.getenv("APEX_BUY_SIZE_PCT", "0.025"))             # 2.5% NAV for standard buy
+    APEX_MAX_GROSS_EXPOSURE: float = float(os.getenv("APEX_MAX_GROSS_EXPOSURE", "0.15"))  # 15% NAV max total exposure
+    APEX_CONSECUTIVE_STOP_HALT: int = int(os.getenv("APEX_CONSECUTIVE_STOP_HALT", "3"))   # halt after N consecutive stops
+    APEX_VIX_SUSPEND: float = float(os.getenv("APEX_VIX_SUSPEND", "35.0"))               # suspend system above this VIX
+    APEX_VIX_REDUCE: float = float(os.getenv("APEX_VIX_REDUCE", "28.0"))                 # reduce sizes 40% above this VIX
+    APEX_VIX_TIGHTEN_STOP: float = float(os.getenv("APEX_VIX_TIGHTEN_STOP", "0.015"))   # tighter stop when VIX > REDUCE
+    APEX_MIN_GAP_PCT: float = float(os.getenv("APEX_MIN_GAP_PCT", "0.025"))              # minimum pre-market gap for catalyst
+    APEX_MIN_ATR_PCT: float = float(os.getenv("APEX_MIN_ATR_PCT", "0.02"))               # minimum ATR% (daily range filter)
+    APEX_TIME_STOP_HOUR: int = int(os.getenv("APEX_TIME_STOP_HOUR", "12"))               # exit non-moving positions after
+    APEX_TIME_STOP_MINUTE: int = int(os.getenv("APEX_TIME_STOP_MINUTE", "30"))           # this time (12:30 PM ET)
+    APEX_TIME_STOP_MIN_GAIN: float = float(os.getenv("APEX_TIME_STOP_MIN_GAIN", "0.005"))  # must be up 0.5% to hold past noon
+    APEX_ENTRY_SKIP_OPEN_MIN: int = int(os.getenv("APEX_ENTRY_SKIP_OPEN_MIN", "5"))      # skip first N minutes after open
 
     # Logging
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")

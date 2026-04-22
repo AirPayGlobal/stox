@@ -1,14 +1,22 @@
 """
-StoxDaily — Intraday day-trading bot.
+StoxDaily — APEX v4.2 intraday day-trading bot.
 
-Runs a 60-second scan loop during market hours. Executes 4 strategies:
-  ORB (Opening Range Breakout), VWAP scalp, Gap & Go, 9/20 EMA scalp.
-Closes all positions by 3:45 PM ET.
+Long-only tech momentum strategy using the Composite Alpha Score (CAS) engine.
+Scans the APEX tech universe every 60 seconds during market hours.
+Closes all positions by 3:55 PM ET; applies time stop at 12:30 PM.
+
+Key execution rules (from APEX v4.2 spec):
+- Never enter in the first 5 minutes after open (9:30-9:35 AM)
+- Entry trigger: price > VWAP, volume > 1.5x avg, ATR% > 2%
+- Hard stop: -2% from entry; dynamic VWAP stop after 10:30 AM
+- Take-profit 1: +3% | Take-profit 2: +5% (managed in exit loop)
+- Time stop at 12:30 PM: exit positions up < 0.5%
+- Circuit breaker: 3 consecutive stops → halt new entries for the day
+- VIX > 35: suspend system; VIX > 28: reduce sizes 40%
 """
 from __future__ import annotations
 
 import threading
-import time
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -20,17 +28,13 @@ from intraday.client import (
     close_all_positions,
     place_bracket_order,
     is_market_open,
-    minutes_to_close,
 )
 from intraday.data import fetch_bars_batch, get_prev_close
 from intraday.indicators import add_intraday_indicators
 from intraday.portfolio import IntradayPortfolio
 from intraday.risk import IntradayRiskManager
-from intraday.universe import INTRADAY_UNIVERSE
-from intraday.strategies.orb import generate_signal as orb_signal
-from intraday.strategies.vwap_scalp import generate_signal as vwap_signal
-from intraday.strategies.gap_go import generate_signal as gap_go_signal
-from intraday.strategies.ema_scalp import generate_signal as ema_signal
+from intraday.universe import APEX_UNIVERSE, REGIME_REFERENCE
+from intraday.strategies.apex import generate_signal as apex_signal
 from utils.logger import get_logger
 
 logger = get_logger("intraday.bot")
@@ -60,7 +64,7 @@ class IntradayBot:
         self._thread.start()
         self._running = True
         self._status.update({"running": True, "dry_run": dry_run, "error": None})
-        logger.info("StoxDaily started (dry_run=%s)", dry_run)
+        logger.info("StoxDaily APEX v4.2 started (dry_run=%s)", dry_run)
         return {"status": "started", "dry_run": dry_run}
 
     def stop(self) -> dict:
@@ -82,12 +86,13 @@ class IntradayBot:
             "open_positions": len(positions),
             "account": acct,
             "today": self.portfolio.today_summary(),
+            "circuit_breaker": self.risk.circuit_breaker_active,
         }
 
     # ------------------------------------------------------------------ Main loop
 
     def _run_loop(self) -> None:
-        logger.info("StoxDaily scan loop starting")
+        logger.info("StoxDaily APEX scan loop starting")
         while not self._stop_event.is_set():
             try:
                 self._tick()
@@ -101,22 +106,21 @@ class IntradayBot:
 
     def _tick(self) -> None:
         if not is_market_open():
-            # Reset session state at end of day
             if not self.risk.is_market_hours():
                 self.risk.reset()
+                self._prev_closes = {}
             return
 
         acct = get_account()
         equity = acct.get("equity", 0.0)
-
         self.risk.initialize(equity)
         self._status["last_scan"] = datetime.utcnow().isoformat()
 
-        # EOD: close everything
+        # EOD hard close — all positions out by 3:55 PM
         if self.risk.is_eod_close_time():
             logger.info("EOD close time — closing all intraday positions")
             if not self._dry_run:
-                closed_count = close_all_positions()
+                close_all_positions()
                 for sym in list(self.portfolio.open_symbols()):
                     positions = get_positions()
                     if sym not in positions:
@@ -125,72 +129,109 @@ class IntradayBot:
                 logger.info("[DRY RUN] Would close all positions at EOD")
             return
 
-        # Daily loss limit check
-        if self.risk.daily_loss_exceeded(equity):
-            logger.warning("Daily loss limit — no new entries for the rest of the session")
+        # Halt all new entries if daily loss limit or circuit breaker active
+        if self.risk.daily_loss_exceeded(equity) or self.risk.circuit_breaker_active:
+            logger.warning("Risk halt active — managing exits only")
             self._manage_exits(equity)
             return
 
-        # Fetch bars for entire universe in one batch call
-        bars = fetch_bars_batch(INTRADAY_UNIVERSE, timeframe_minutes=5, lookback_bars=100)
+        # Fetch bars for entire universe + regime references in one batch call
+        all_symbols = list(dict.fromkeys(APEX_UNIVERSE + REGIME_REFERENCE))
+        bars = fetch_bars_batch(all_symbols, timeframe_minutes=5, lookback_bars=100)
 
-        # Manage existing positions first
+        # Manage existing positions (stops, TP, time stop, dynamic VWAP stop)
         self._manage_exits(equity, bars=bars)
 
-        # Scan for entries if within trading hours
-        if self.risk.is_market_hours() and not self.risk.is_eod_close_time():
+        # Scan for new entries only if within the allowed entry window
+        if self.risk.is_market_hours() and self.risk.is_entry_allowed_time():
             self._scan_entries(equity, bars)
 
     # ------------------------------------------------------------------ Exit management
 
     def _manage_exits(self, equity: float, bars: Optional[dict] = None) -> None:
         positions = get_positions()
-        open_symbols = self.portfolio.open_symbols()
 
-        for symbol in list(open_symbols):
+        for symbol in list(self.portfolio.open_symbols()):
             alpaca_pos = positions.get(symbol)
             if alpaca_pos is None:
-                # Position closed externally (stop/TP filled)
+                # Bracket order was filled by Alpaca (stop or TP hit externally)
                 trade = self.portfolio.get_open_trade(symbol)
                 if trade:
-                    exit_price = trade.stop_loss  # approximate
-                    self.portfolio.close_trade(symbol, exit_price, status="CLOSED")
+                    if trade.pnl_pct < 0:
+                        self.risk.record_stop()
+                    else:
+                        self.risk.record_win()
+                    self.portfolio.close_trade(symbol, trade.stop_loss, status="CLOSED")
                 continue
 
             trade = self.portfolio.get_open_trade(symbol)
             if not trade:
                 continue
 
-            current_price = alpaca_pos.get("avg_entry", trade.entry_price)
+            # Resolve current price from live bars or Alpaca position data
+            current_price = float(alpaca_pos.get("current_price", trade.entry_price) or trade.entry_price)
             if bars and symbol in bars:
                 df = bars[symbol]
                 if not df.empty:
                     current_price = float(df["close"].iloc[-1])
 
-            # Check stop loss / take profit manually (bracket orders handle this on Alpaca,
-            # but we sync portfolio state)
-            if trade.side == "buy":
-                if current_price <= trade.stop_loss:
-                    logger.info("Stop loss hit: %s @ %.2f", symbol, current_price)
-                    if not self._dry_run:
-                        close_position(symbol)
-                    self.portfolio.close_trade(symbol, current_price, status="STOPPED")
-                elif current_price >= trade.take_profit:
-                    logger.info("Take profit hit: %s @ %.2f", symbol, current_price)
-                    if not self._dry_run:
-                        close_position(symbol)
-                    self.portfolio.close_trade(symbol, current_price, status="TOOK_PROFIT")
-            else:  # short
-                if current_price >= trade.stop_loss:
-                    logger.info("Stop loss hit (short): %s @ %.2f", symbol, current_price)
-                    if not self._dry_run:
-                        close_position(symbol)
-                    self.portfolio.close_trade(symbol, current_price, status="STOPPED")
-                elif current_price <= trade.take_profit:
-                    logger.info("Take profit hit (short): %s @ %.2f", symbol, current_price)
-                    if not self._dry_run:
-                        close_position(symbol)
-                    self.portfolio.close_trade(symbol, current_price, status="TOOK_PROFIT")
+            gain_pct = (current_price - trade.entry_price) / trade.entry_price if trade.entry_price > 0 else 0.0
+
+            # ---- Time stop: exit by 12:30 PM if not up ≥0.5% (opportunity cost rule) ----
+            if self.risk.is_time_stop_zone() and gain_pct < Config.APEX_TIME_STOP_MIN_GAIN:
+                logger.info(
+                    "Time stop: %s gain=%.2f%% < %.2f%% at noon",
+                    symbol, gain_pct * 100, Config.APEX_TIME_STOP_MIN_GAIN * 100,
+                )
+                if not self._dry_run:
+                    close_position(symbol)
+                self.risk.record_stop() if gain_pct < 0 else self.risk.record_win()
+                self.portfolio.close_trade(symbol, current_price, status="TIME_STOP")
+                continue
+
+            # ---- Hard stop: -2% from entry ----
+            if current_price <= trade.stop_loss:
+                logger.info("Hard stop hit: %s @ %.2f (entry=%.2f SL=%.2f)", symbol, current_price, trade.entry_price, trade.stop_loss)
+                if not self._dry_run:
+                    close_position(symbol)
+                self.risk.record_stop()
+                self.portfolio.close_trade(symbol, current_price, status="STOPPED")
+                continue
+
+            # ---- Dynamic VWAP stop after 10:30 AM (exit if below VWAP and losing) ----
+            if self.risk.is_dynamic_stop_time() and bars and symbol in bars:
+                df = bars[symbol]
+                if not df.empty:
+                    df_ind = add_intraday_indicators(df)
+                    vwap_now = float(df_ind["vwap"].iloc[-1])
+                    if vwap_now > 0 and current_price < vwap_now and gain_pct < 0:
+                        logger.info(
+                            "Dynamic VWAP stop: %s price=%.2f < vwap=%.2f gain=%.2f%%",
+                            symbol, current_price, vwap_now, gain_pct * 100,
+                        )
+                        if not self._dry_run:
+                            close_position(symbol)
+                        self.risk.record_stop()
+                        self.portfolio.close_trade(symbol, current_price, status="STOPPED")
+                        continue
+
+            # ---- Take-profit 2: +5% — full exit ----
+            target_2 = trade.target_2 if trade.target_2 > 0 else trade.entry_price * (1.0 + Config.APEX_TARGET2_PCT)
+            if current_price >= target_2:
+                logger.info("TP2 hit: %s @ %.2f (+%.1f%%)", symbol, current_price, gain_pct * 100)
+                if not self._dry_run:
+                    close_position(symbol)
+                self.risk.record_win()
+                self.portfolio.close_trade(symbol, current_price, status="TOOK_PROFIT")
+                continue
+
+            # ---- Take-profit 1: +3% — bracket order handles this; sync portfolio state ----
+            if trade.take_profit > 0 and current_price >= trade.take_profit:
+                logger.info("TP1 hit: %s @ %.2f (+%.1f%%)", symbol, current_price, gain_pct * 100)
+                if not self._dry_run:
+                    close_position(symbol)
+                self.risk.record_win()
+                self.portfolio.close_trade(symbol, current_price, status="TOOK_PROFIT")
 
     # ------------------------------------------------------------------ Entry scanning
 
@@ -201,60 +242,48 @@ class IntradayBot:
         if not self.risk.can_open_position(open_count, equity):
             return
 
-        # Pre-fetch prev closes once per session
+        # Pre-fetch previous closes once per session
         if not self._prev_closes:
             self._prev_closes = {
                 sym: get_prev_close(sym)
-                for sym in INTRADAY_UNIVERSE[:20]  # limit API calls
+                for sym in APEX_UNIVERSE[:25]
             }
 
-        # Collect all signals across all strategies
-        candidates: list[tuple[float, object, str]] = []  # (score, signal, strategy)
+        # QQQ bars for macro regime factor
+        qqq_df = bars.get("QQQ")
 
-        for symbol, df in bars.items():
+        # Current open position values for gross exposure check
+        positions = get_positions()
+        open_values = [
+            float(p.get("market_value", 0.0) or 0.0)
+            for p in positions.values()
+        ]
+
+        # Score all candidates with APEX CAS engine
+        candidates: list[tuple[float, object]] = []
+
+        for symbol in APEX_UNIVERSE:
             if symbol in open_symbols:
                 continue
+            df = bars.get(symbol)
             if df is None or df.empty:
                 continue
-
-            # ORB
             try:
-                sig = orb_signal(symbol, df, orb_minutes=Config.INTRADAY_ORB_MINUTES)
+                sig = apex_signal(
+                    symbol=symbol,
+                    df=df,
+                    prev_close=self._prev_closes.get(symbol, 0.0),
+                    qqq_df=qqq_df,
+                )
                 if sig:
-                    candidates.append((sig.score, sig, "ORB"))
-            except Exception:
-                pass
+                    candidates.append((sig.cas_score, sig))
+            except Exception as exc:
+                logger.debug("APEX signal error %s: %s", symbol, exc)
 
-            # VWAP scalp
-            try:
-                sig = vwap_signal(symbol, df)
-                if sig:
-                    candidates.append((sig.score, sig, "VWAP"))
-            except Exception:
-                pass
-
-            # Gap & Go
-            try:
-                prev_close = self._prev_closes.get(symbol, 0.0)
-                sig = gap_go_signal(symbol, df, prev_close=prev_close)
-                if sig:
-                    candidates.append((sig.score, sig, "GAP_GO"))
-            except Exception:
-                pass
-
-            # EMA scalp
-            try:
-                sig = ema_signal(symbol, df)
-                if sig:
-                    candidates.append((sig.score, sig, "EMA"))
-            except Exception:
-                pass
-
-        # Sort by score descending, take best signals
+        # Best CAS scores first
         candidates.sort(key=lambda x: x[0], reverse=True)
 
-        for score, sig, strategy in candidates:
-            # Re-check position count since we may have added in this loop
+        for cas_score, sig in candidates:
             current_open = len(self.portfolio.open_symbols())
             if not self.risk.can_open_position(current_open, equity):
                 break
@@ -263,14 +292,22 @@ class IntradayBot:
             if symbol in self.portfolio.open_symbols():
                 continue
 
-            qty = self.risk.position_size(equity, sig.entry_price)
+            if not self.risk.gross_exposure_ok(open_values, equity):
+                logger.info("Gross exposure cap reached — no more entries this scan")
+                break
+
+            qty = self.risk.position_size_for_cas(equity, sig.entry_price, cas_score)
             if qty <= 0:
                 continue
 
+            tier = "STRONG BUY" if cas_score >= Config.APEX_STRONG_BUY_CAS else "BUY"
             logger.info(
-                "[%s] Signal: %s %s qty=%d entry=%.2f SL=%.2f TP=%.2f score=%.1f",
-                strategy, sig.side.upper(), symbol, qty,
-                sig.entry_price, sig.stop_loss, sig.take_profit, score,
+                "[APEX %s] %s qty=%d entry=%.2f SL=%.2f TP1=%.2f TP2=%.2f CAS=%.1f "
+                "(A=%.1f B=%.1f C=%.1f D=%.1f)",
+                tier, symbol, qty, sig.entry_price, sig.stop_loss,
+                sig.take_profit, sig.target_2, cas_score,
+                sig.factor_catalyst, sig.factor_momentum,
+                sig.factor_technical, sig.factor_regime,
             )
 
             order_id = None
@@ -284,7 +321,10 @@ class IntradayBot:
                     take_profit=sig.take_profit,
                 )
             else:
-                logger.info("[DRY RUN] Would place bracket order: %s %s x%d", sig.side, symbol, qty)
+                logger.info(
+                    "[DRY RUN] Would place bracket: %s x%d SL=%.2f TP=%.2f CAS=%.1f",
+                    symbol, qty, sig.stop_loss, sig.take_profit, cas_score,
+                )
                 order_id = "dry-run"
 
             if order_id:
@@ -295,9 +335,12 @@ class IntradayBot:
                     entry_price=sig.entry_price,
                     stop_loss=sig.stop_loss,
                     take_profit=sig.take_profit,
-                    strategy=strategy,
+                    strategy="APEX",
                     order_id=order_id,
+                    cas_score=sig.cas_score,
+                    target_2=sig.target_2,
                 )
+                open_values.append(sig.entry_price * qty)
 
 
 # Module-level singleton

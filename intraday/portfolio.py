@@ -25,14 +25,17 @@ class IntradayTrade:
     entry_price: float
     stop_loss: float
     take_profit: float
-    strategy: str           # "ORB" | "VWAP" | "GAP_GO" | "EMA"
+    strategy: str           # "APEX" | "ORB" | "VWAP" | "GAP_GO" | "EMA"
     order_id: Optional[str] = None
-    status: str = "OPEN"    # "OPEN" | "CLOSED" | "STOPPED" | "TOOK_PROFIT" | "EOD_CLOSE"
+    status: str = "OPEN"    # "OPEN" | "CLOSED" | "STOPPED" | "TOOK_PROFIT" | "TIME_STOP" | "EOD_CLOSE"
     entry_time: str = field(default_factory=lambda: datetime.utcnow().isoformat())
     exit_time: Optional[str] = None
     exit_price: Optional[float] = None
     pnl: float = 0.0
     pnl_pct: float = 0.0
+    # APEX-specific fields
+    cas_score: float = 0.0          # Composite Alpha Score at entry
+    target_2: float = 0.0           # second take-profit level (+5%)
 
 
 class IntradayPortfolio:
@@ -90,6 +93,8 @@ class IntradayPortfolio:
         take_profit: float,
         strategy: str,
         order_id: Optional[str] = None,
+        cas_score: float = 0.0,
+        target_2: float = 0.0,
     ) -> IntradayTrade:
         trade = IntradayTrade(
             symbol=symbol,
@@ -100,6 +105,8 @@ class IntradayPortfolio:
             take_profit=take_profit,
             strategy=strategy,
             order_id=order_id,
+            cas_score=cas_score,
+            target_2=target_2,
         )
         with self._lock:
             self._trades.append(trade)
