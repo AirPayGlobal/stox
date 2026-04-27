@@ -92,7 +92,14 @@ async def _auto_start_bot() -> None:
         for k, v in saved.items():
             if hasattr(cfg, k):
                 setattr(cfg, k, v)
+    # Auto-start overnight swing bot
     _bot_manager().start(dry_run=False)
+    # Auto-start intraday APEX bot — runs 24/7, idles outside market hours
+    try:
+        _intraday_bot().start(dry_run=False)
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("Intraday bot auto-start failed: %s", exc)
 
 _DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
 _DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
