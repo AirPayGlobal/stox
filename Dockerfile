@@ -42,4 +42,4 @@ RUN mkdir -p /data logs
 EXPOSE 8000
 
 # Uvicorn serves the FastAPI app; the bot is started via the dashboard
-CMD ["sh", "-c", "uvicorn api.server:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8000"]
