@@ -47,6 +47,11 @@ class Config:
     # Floor = max(target * PROFIT_FLOOR_PCT, peak * (1 - PROFIT_GIVEBACK_PCT))
     PROFIT_FLOOR_PCT: float = _f("PROFIT_FLOOR_PCT", 0.70)      # keep >= 70% of target
     PROFIT_GIVEBACK_PCT: float = _f("PROFIT_GIVEBACK_PCT", 0.30)  # give back <= 30% of peak
+    # What hitting the floor does:
+    #   "hold"    — stop NEW entries; open positions run to their own
+    #               stops/targets (extra risk bounded by per-trade stops)
+    #   "flatten" — close everything immediately and bank the day
+    PROTECT_MODE: str = os.getenv("PROTECT_MODE", "hold").lower()
     MAX_TRADES_PER_DAY: int = _i("MAX_TRADES_PER_DAY", 12)
     MAX_CONCURRENT_POSITIONS: int = _i("MAX_CONCURRENT_POSITIONS", 3)
 

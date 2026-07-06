@@ -35,7 +35,8 @@ def test_profit_floor_ratchets_with_peak():
     assert rm.state.peak_pnl == 15_000
 
 
-def test_giveback_floor_banks_the_day():
+def test_giveback_floor_blocks_entries_in_hold_mode(monkeypatch):
+    monkeypatch.setattr(Config, "PROTECT_MODE", "hold")
     rm = make_rm(100_000)
     rm.update_governor(equity=110_000)   # target hit, peak +10k, floor +7k
     ok, _ = rm.can_open(equity=110_000, open_positions=0)
@@ -43,11 +44,21 @@ def test_giveback_floor_banks_the_day():
     ok, why = rm.can_open(equity=106_900, open_positions=0)  # +6.9k <= floor
     assert not ok
     assert "profit protection" in why
-    assert rm.must_flatten()
-    assert rm.flatten_reason() == "PROTECT"
+    # Hold mode: open positions are NOT force-closed.
+    assert not rm.must_flatten()
     # Sticky even if P&L bounces back above the floor.
     ok, _ = rm.can_open(equity=112_000, open_positions=0)
     assert not ok
+
+
+def test_giveback_floor_flattens_in_flatten_mode(monkeypatch):
+    monkeypatch.setattr(Config, "PROTECT_MODE", "flatten")
+    rm = make_rm(100_000)
+    rm.update_governor(equity=110_000)
+    rm.update_governor(equity=106_900)   # hits the +7k floor
+    assert rm.state.protect_locked
+    assert rm.must_flatten()
+    assert rm.flatten_reason() == "PROTECT"
 
 
 def test_floor_at_exact_target():
