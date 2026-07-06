@@ -33,10 +33,11 @@ Two independent signal strategies (`STRATEGY=orb|sweep|both`):
 
 1. **ORB momentum** — opening-range breakout with VWAP/EMA/RSI confluence
    scoring, premium-based exits (+50% / −30% / time stop). Described below.
-2. **Sweep reversal** — liquidity-sweep-and-reclaim ("manipulation candle"):
-   a higher-timeframe candle sweeps the previous candle's low (or the
-   previous day's low) and closes back above it → buy calls; mirror image →
-   buy puts. Stop beyond the sweep wick, target at 2× the risk, both tracked
+2. **Sweep reversal** — liquidity-sweep-and-reclaim ("manipulation candle")
+   against three level sets: the previous higher-timeframe candle, the
+   previous day's high/low, and the overnight/pre-market range (the AMD
+   "accumulation range"). A sweep below a level that closes back above it →
+   buy calls; mirror image → buy puts. Stop beyond the sweep wick, target at 2× the risk, both tracked
    on the **underlying** price. Optional retracement entry into the fair
    value gap for better RR. Systemized from trader transcripts — see
    [docs/STRATEGIES.md](docs/STRATEGIES.md) for the full mapping and caveats.

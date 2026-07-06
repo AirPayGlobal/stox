@@ -29,7 +29,13 @@ import pandas as pd
 
 from analysis.htf import completed_bars, resample_bars
 from analysis.signals import Signal, generate_signal
-from analysis.sweeps import prev_day_level_sweep, rr_target, sweep_reclaim
+from analysis.sweeps import (
+    level_sweep,
+    overnight_range,
+    prev_day_level_sweep,
+    rr_target,
+    sweep_reclaim,
+)
 from backtest.bs import bs_price
 from config import Config
 from data.market_data import get_intraday_bars
@@ -149,10 +155,14 @@ def simulate_day_orb(symbol: str, day_bars: pd.DataFrame, equity: float) -> list
 
 
 def simulate_day_sweep(
-    symbol: str, prev_day_bars: pd.DataFrame | None, day_bars: pd.DataFrame, equity: float
+    symbol: str,
+    prev_day_bars: pd.DataFrame | None,
+    day_bars: pd.DataFrame,
+    equity: float,
+    onr: tuple[float, float] | None = None,
 ) -> list[dict]:
     """Liquidity-sweep reversal: underlying-level stop/target (engine parity,
-    SWEEP_ENTRY=close mode)."""
+    SWEEP_ENTRY=close mode). `onr` is the overnight/pre-market (high, low)."""
     trades: list[dict] = []
     open_trade: dict | None = None
     iv = realized_iv(day_bars)
@@ -198,6 +208,8 @@ def simulate_day_sweep(
         sig = sweep_reclaim(htf.tail(2), trend_filter=Config.SWEEP_TREND_FILTER)
         if sig is None and Config.SWEEP_PREV_DAY_LEVELS and prev_high is not None:
             sig = prev_day_level_sweep(day_bars.iloc[: i + 1], prev_high, prev_low)
+        if sig is None and Config.SWEEP_OVERNIGHT_RANGE and onr is not None:
+            sig = level_sweep(day_bars.iloc[: i + 1], onr[0], onr[1], "overnight_range")
         if sig is None:
             continue
         dedupe = f"{sig.kind}|{sig.candle_ts}"
@@ -222,10 +234,11 @@ def run(symbols: list[str], days: int, equity: float, strategy: str) -> None:
 
     for symbol in symbols:
         print(f"Fetching {days} days of {Config.BAR_MINUTES}-min bars for {symbol}…")
-        bars = get_intraday_bars(symbol, lookback_days=days)
-        if bars.empty:
+        bars_ext = get_intraday_bars(symbol, lookback_days=days, rth_only=False)
+        if bars_ext.empty:
             print(f"  no data for {symbol} — skipping")
             continue
+        bars = bars_ext.between_time("09:30", "16:00")
         day_groups = [(d, g) for d, g in bars.groupby(bars.index.date)]
         for idx, (day, day_bars) in enumerate(day_groups):
             prev_bars = day_groups[idx - 1][1] if idx > 0 else None
@@ -234,7 +247,8 @@ def run(symbols: list[str], days: int, equity: float, strategy: str) -> None:
                     t["strategy"] = "orb"
                     all_trades.append(t)
             if "sweep" in strategies:
-                for t in simulate_day_sweep(symbol, prev_bars, day_bars, equity):
+                onr = overnight_range(bars_ext, day) if Config.SWEEP_OVERNIGHT_RANGE else None
+                for t in simulate_day_sweep(symbol, prev_bars, day_bars, equity, onr=onr):
                     t["strategy"] = "sweep"
                     all_trades.append(t)
 

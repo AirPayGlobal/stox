@@ -36,11 +36,13 @@ def get_intraday_bars(
     symbol: str,
     minutes: int | None = None,
     lookback_days: int = 1,
+    rth_only: bool = True,
 ) -> pd.DataFrame:
     """
     Fetch intraday bars for `symbol` covering today (and `lookback_days - 1`
     prior days). Returns a DataFrame indexed by ET timestamp with columns
-    open/high/low/close/volume, restricted to regular trading hours.
+    open/high/low/close/volume. `rth_only=False` keeps extended-hours bars
+    (needed for the overnight/pre-market range).
     """
     from alpaca.data.requests import StockBarsRequest
     from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
@@ -66,9 +68,9 @@ def get_intraday_bars(
         df = df.xs(symbol, level="symbol")
 
     df = df.tz_convert(ET)
-    # Regular trading hours only — pre/post-market bars pollute VWAP and the
-    # opening range.
-    df = df.between_time("09:30", "16:00")
+    if rth_only:
+        # Pre/post-market bars pollute VWAP and the opening range.
+        df = df.between_time("09:30", "16:00")
     return df[["open", "high", "low", "close", "volume"]]
 
 
