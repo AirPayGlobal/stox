@@ -102,6 +102,27 @@ def authz_debug():
         "password_is_default": pw == "changeme",
         "password_ascii_only": pw.isascii(),
         "raw_password_had_surrounding_whitespace": pw != Config.DASHBOARD_PASS,
+        "env_var_DASHBOARD_USER_present": "DASHBOARD_USER" in os.environ,
+        "env_var_DASHBOARD_PASS_present": "DASHBOARD_PASS" in os.environ,
+    }
+
+
+@app.get("/authz-debug/check")
+def authz_debug_check(u: str = "", p: str = ""):
+    """
+    TEMPORARY: compare attempted credentials against the configured ones and
+    say WHICH field mismatches, without revealing the stored values.
+    Usage: /authz-debug/check?u=myuser&p=mypass
+    """
+    exp_user = Config.DASHBOARD_USER.strip()
+    exp_pw = Config.DASHBOARD_PASS.strip()
+    return {
+        "username_matches": secrets.compare_digest(u.encode(), exp_user.encode()),
+        "password_matches": secrets.compare_digest(p.encode(), exp_pw.encode()),
+        "you_typed_user_length": len(u),
+        "expected_user_length": len(exp_user),
+        "you_typed_password_length": len(p),
+        "expected_password_length": len(exp_pw),
     }
 
 
