@@ -25,7 +25,9 @@ class DayState:
     day: date = field(default_factory=date.today)
     start_equity: float = 0.0
     trades_opened: int = 0
-    target_locked: bool = False
+    target_hit: bool = False       # armed profit protection (trading continues)
+    peak_pnl: float = 0.0
+    protect_locked: bool = False   # giveback floor hit -> day banked
     loss_halted: bool = False
 
 
@@ -56,15 +58,42 @@ class RiskManager:
         return equity - self.state.start_equity
 
     # ------------------------------------------------------------ Governor
+    def profit_floor(self) -> float:
+        """Trailing floor under day P&L once the target has been hit."""
+        return max(
+            Config.DAILY_PROFIT_TARGET * Config.PROFIT_FLOOR_PCT,
+            self.state.peak_pnl * (1 - Config.PROFIT_GIVEBACK_PCT),
+        )
+
     def update_governor(self, equity: float) -> None:
-        """Re-evaluate target/loss locks. Locks are sticky for the day."""
+        """Re-evaluate protection/halt state. Locks are sticky for the day.
+
+        Reaching the profit target does NOT stop trading: it arms a trailing
+        giveback floor that ratchets with the day's peak P&L. Falling back to
+        the floor banks the day (protect_locked). The loss side is a hard halt.
+        """
+        s = self.state
         pnl = self.day_pnl(equity)
-        if not self.state.target_locked and pnl >= Config.DAILY_PROFIT_TARGET:
-            self.state.target_locked = True
-            logger.info(f"🎯 DAILY TARGET HIT: +${pnl:,.2f} — locking in, no new trades today")
+
+        if pnl > s.peak_pnl:
+            s.peak_pnl = pnl
             self._save()
-        if not self.state.loss_halted and pnl <= -Config.DAILY_MAX_LOSS:
-            self.state.loss_halted = True
+        if not s.target_hit and pnl >= Config.DAILY_PROFIT_TARGET:
+            s.target_hit = True
+            logger.info(
+                f"🎯 DAILY TARGET REACHED: +${pnl:,.2f} — trading continues, "
+                f"profit protection armed (floor +${self.profit_floor():,.0f})"
+            )
+            self._save()
+        if s.target_hit and not s.protect_locked and pnl <= self.profit_floor():
+            s.protect_locked = True
+            logger.info(
+                f"🔒 PROFIT PROTECTION: day P&L ${pnl:,.2f} fell to the floor "
+                f"(+${self.profit_floor():,.0f}) — banking the day"
+            )
+            self._save()
+        if not s.loss_halted and pnl <= -Config.DAILY_MAX_LOSS:
+            s.loss_halted = True
             logger.warning(f"🛑 DAILY MAX LOSS HIT: ${pnl:,.2f} — halting for the day")
             self._save()
 
@@ -73,8 +102,8 @@ class RiskManager:
         s = self.state
         if s.loss_halted:
             return False, "daily max loss reached"
-        if s.target_locked:
-            return False, "daily profit target reached"
+        if s.protect_locked:
+            return False, "profit protection banked the day"
         if s.trades_opened >= Config.MAX_TRADES_PER_DAY:
             return False, "max trades per day reached"
         if open_positions >= Config.MAX_CONCURRENT_POSITIONS:
@@ -82,7 +111,14 @@ class RiskManager:
         return True, ""
 
     def must_flatten(self) -> bool:
-        return self.state.loss_halted
+        return self.state.loss_halted or self.state.protect_locked
+
+    def flatten_reason(self) -> str:
+        if self.state.loss_halted:
+            return "HALT"
+        if self.state.protect_locked:
+            return "PROTECT"
+        return "FLATTEN"
 
     def record_open(self) -> None:
         self.state.trades_opened += 1
@@ -108,7 +144,9 @@ class RiskManager:
                     day=date.today(),
                     start_equity=float(raw.get("start_equity", 0.0)),
                     trades_opened=int(raw.get("trades_opened", 0)),
-                    target_locked=bool(raw.get("target_locked", False)),
+                    target_hit=bool(raw.get("target_hit", False)),
+                    peak_pnl=float(raw.get("peak_pnl", 0.0)),
+                    protect_locked=bool(raw.get("protect_locked", False)),
                     loss_halted=bool(raw.get("loss_halted", False)),
                 )
                 logger.info(
@@ -164,9 +202,12 @@ class RiskManager:
             "day": s.day.isoformat(),
             "start_equity": s.start_equity,
             "day_pnl": round(self.day_pnl(equity), 2),
+            "peak_pnl": round(s.peak_pnl, 2),
             "profit_target": Config.DAILY_PROFIT_TARGET,
             "max_loss": Config.DAILY_MAX_LOSS,
             "trades_opened": s.trades_opened,
-            "target_locked": s.target_locked,
+            "target_hit": s.target_hit,
+            "profit_floor": round(self.profit_floor(), 2) if s.target_hit else None,
+            "protect_locked": s.protect_locked,
             "loss_halted": s.loss_halted,
         }

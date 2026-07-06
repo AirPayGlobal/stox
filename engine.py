@@ -171,7 +171,7 @@ class TradingEngine:
 
             reason = None
             if flatten_all:
-                reason = "HALT" if self.risk.must_flatten() else "FLATTEN"
+                reason = self.risk.flatten_reason()
             elif trade.stop_underlying or trade.target_underlying:
                 if trade.underlying not in ul_prices:
                     ul_prices[trade.underlying] = get_latest_price(trade.underlying)
@@ -329,6 +329,12 @@ class TradingEngine:
         blocked = self._entry_blocked(underlying)
         if blocked:
             logger.info(f"{underlying} sweep entry blocked: {blocked}")
+            return
+        if abs(spot - sig.extreme) < spot * Config.SWEEP_MIN_STOP_PCT:
+            logger.info(
+                f"{underlying} sweep skipped: stop too tight "
+                f"({abs(spot - sig.extreme):.2f} < {spot * Config.SWEEP_MIN_STOP_PCT:.2f})"
+            )
             return
         self._acted_sweeps.add(dedupe)
 
