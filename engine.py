@@ -201,6 +201,21 @@ class TradingEngine:
             if Config.STRATEGY in ("sweep", "both"):
                 self._scan_sweep(underlying, equity)
 
+    def _entry_blocked(self, underlying: str) -> str | None:
+        """Loss discipline: cooldown after a stop-out, and a hard per-day
+        cutoff after consecutive losers on the same underlying."""
+        streak = self.book.consecutive_losses(underlying)
+        if streak >= Config.MAX_CONSECUTIVE_LOSSES:
+            return f"{streak} consecutive losses — done with {underlying} today"
+        last_loss = self.book.last_loss_time(underlying)
+        if last_loss is not None:
+            elapsed = (datetime.now(ET) - last_loss).total_seconds() / 60
+            if elapsed < Config.LOSS_COOLDOWN_MINUTES:
+                return (
+                    f"loss cooldown ({elapsed:.0f}/{Config.LOSS_COOLDOWN_MINUTES} min)"
+                )
+        return None
+
     # ------------------------------------------------------------ ORB momentum
     def _scan_orb(self, underlying: str, equity: float) -> None:
         bars = get_today_bars(underlying)
@@ -212,6 +227,10 @@ class TradingEngine:
             "at": datetime.now(ET).isoformat(timespec="seconds"),
         }
         if result.signal == Signal.FLAT or self.book.open_for(underlying):
+            return
+        blocked = self._entry_blocked(underlying)
+        if blocked:
+            logger.info(f"{underlying} orb entry blocked: {blocked}")
             return
         self._enter(
             underlying,
@@ -257,6 +276,10 @@ class TradingEngine:
         if dedupe in self._acted_sweeps:
             return
         if self.book.open_for(underlying) or underlying in self.pending:
+            return
+        blocked = self._entry_blocked(underlying)
+        if blocked:
+            logger.info(f"{underlying} sweep entry blocked: {blocked}")
             return
         self._acted_sweeps.add(dedupe)
 
@@ -348,6 +371,10 @@ class TradingEngine:
             ok, why = self.risk.can_open(equity, len(self.book.open_trades))
             if not ok:
                 logger.info(f"Retrace triggered but cannot open: {why}")
+                continue
+            blocked = self._entry_blocked(underlying)
+            if blocked:
+                logger.info(f"Retrace triggered but blocked: {blocked}")
                 continue
             target = rr_target(price, stop, Config.SWEEP_RR)
             self._enter(

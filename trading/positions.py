@@ -127,6 +127,29 @@ class PositionBook:
         today = datetime.now(ET).date().isoformat()
         return [t for t in self.book.closed_trades if t.closed_at[:10] == today]
 
+    def consecutive_losses(self, underlying: str) -> int:
+        """Length of the current losing streak on `underlying` today."""
+        streak = 0
+        for trade in reversed(self.closed_today()):
+            if trade.underlying != underlying:
+                continue
+            if trade.pnl < 0:
+                streak += 1
+            else:
+                break
+        return streak
+
+    def last_loss_time(self, underlying: str) -> datetime | None:
+        """Close time of the most recent trade on `underlying` today, if it
+        was a loss (a winning close resets the cooldown)."""
+        for trade in reversed(self.closed_today()):
+            if trade.underlying != underlying:
+                continue
+            if trade.pnl < 0:
+                return datetime.fromisoformat(trade.closed_at)
+            return None
+        return None
+
     def realized_today(self) -> float:
         return sum(t.pnl for t in self.closed_today())
 

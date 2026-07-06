@@ -48,14 +48,25 @@ class Config:
     # ------------------------------------------------------------ Position sizing
     # Risk per trade is the amount lost if the stop-loss fires (premium *
     # STOP_LOSS_PCT), capped at RISK_PER_TRADE_PCT of account equity.
+    # NOTE: env names are prefixed PREMIUM_/MAX_PREMIUM_ deliberately — the
+    # old stock bot used STOP_LOSS_PCT/TAKE_PROFIT_PCT/MAX_POSITION_PCT with
+    # stock-scale values (2%/6%), and stale copies of those variables in
+    # hosting dashboards silently strangled option exits.
     RISK_PER_TRADE_PCT: float = _f("RISK_PER_TRADE_PCT", 0.01)
-    MAX_POSITION_PCT: float = _f("MAX_POSITION_PCT", 0.10)   # max premium outlay / equity
+    MAX_POSITION_PCT: float = _f("MAX_PREMIUM_PCT", 0.10)    # max premium outlay / equity
     MAX_CONTRACTS: int = _i("MAX_CONTRACTS", 50)
 
     # ------------------------------------------------------------ Exits
-    TAKE_PROFIT_PCT: float = _f("TAKE_PROFIT_PCT", 0.50)     # +50% on premium
-    STOP_LOSS_PCT: float = _f("STOP_LOSS_PCT", 0.30)         # -30% on premium
+    TAKE_PROFIT_PCT: float = _f("PREMIUM_TARGET_PCT", 0.50)  # +50% on premium
+    STOP_LOSS_PCT: float = _f("PREMIUM_STOP_PCT", 0.30)      # -30% on premium
     MAX_HOLD_MINUTES: int = _i("MAX_HOLD_MINUTES", 90)       # time stop
+
+    # ------------------------------------------------------------ Loss discipline
+    # After a losing close on an underlying, no re-entry for this long...
+    LOSS_COOLDOWN_MINUTES: int = _i("LOSS_COOLDOWN_MINUTES", 30)
+    # ...and after this many consecutive losers on one underlying, it is
+    # done for the day.
+    MAX_CONSECUTIVE_LOSSES: int = _i("MAX_CONSECUTIVE_LOSSES", 3)
 
     # ------------------------------------------------------------ Contract selection
     MAX_DTE: int = _i("MAX_DTE", 1)                          # 0 = same-day expiry only

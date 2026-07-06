@@ -113,6 +113,23 @@ def _close_synthetic(trade, spot, ts, iv, reason):
     return trade
 
 
+def _loss_discipline_blocked(trades: list[dict], ts) -> bool:
+    """Engine parity: post-loss cooldown + consecutive-loss cutoff."""
+    streak = 0
+    for t in reversed(trades):
+        if t["pnl"] < 0:
+            streak += 1
+        else:
+            break
+    if streak >= Config.MAX_CONSECUTIVE_LOSSES:
+        return True
+    if trades and trades[-1]["pnl"] < 0:
+        minutes = (ts - trades[-1]["closed_ts"]).total_seconds() / 60
+        if minutes < Config.LOSS_COOLDOWN_MINUTES:
+            return True
+    return False
+
+
 def simulate_day_orb(symbol: str, day_bars: pd.DataFrame, equity: float) -> list[dict]:
     """Opening-range momentum: premium-based exits (engine parity)."""
     trades: list[dict] = []
@@ -140,11 +157,15 @@ def simulate_day_orb(symbol: str, day_bars: pd.DataFrame, equity: float) -> list
             elif minutes_open >= Config.MAX_HOLD_MINUTES:
                 reason = "TIME"
             if reason:
-                trades.append(_close_synthetic(open_trade, spot, ts, iv, reason))
+                closed = _close_synthetic(open_trade, spot, ts, iv, reason)
+                closed["closed_ts"] = ts
+                trades.append(closed)
                 open_trade = None
             continue
 
         if not (entry_start <= ts.time() <= entry_cutoff):
+            continue
+        if _loss_discipline_blocked(trades, ts):
             continue
         result = generate_signal(window)
         if result.signal == Signal.FLAT:
@@ -194,11 +215,15 @@ def simulate_day_sweep(
                 elif spot <= open_trade["target_ul"]:
                     reason = "UL_TP"
             if reason:
-                trades.append(_close_synthetic(open_trade, spot, ts, iv, reason))
+                closed = _close_synthetic(open_trade, spot, ts, iv, reason)
+                closed["closed_ts"] = ts
+                trades.append(closed)
                 open_trade = None
             continue
 
         if not (entry_start <= ts.time() <= entry_cutoff):
+            continue
+        if _loss_discipline_blocked(trades, ts):
             continue
 
         # Decision at the close of bar i — completed bars only.
