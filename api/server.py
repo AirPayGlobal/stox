@@ -12,13 +12,14 @@ Endpoints (HTTP basic auth):
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import os
 import secrets
 import threading
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import FileResponse
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 from config import Config
 from engine import TradingEngine
@@ -27,7 +28,6 @@ from utils.logger import get_logger
 logger = get_logger("api")
 
 app = FastAPI(title="STOX Options", docs_url=None, redoc_url=None)
-security = HTTPBasic()
 
 _engine: TradingEngine | None = None
 _thread: threading.Thread | None = None
@@ -36,15 +36,53 @@ _lock = threading.Lock()
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
-def _auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    user_ok = secrets.compare_digest(credentials.username, Config.DASHBOARD_USER)
-    pass_ok = secrets.compare_digest(credentials.password, Config.DASHBOARD_PASS)
+APP_VERSION = "2.1.0"
+
+
+def _unauthorized() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        headers={"WWW-Authenticate": 'Basic realm="stox"'},
+    )
+
+
+def _auth(request: Request) -> str:
+    # Custom Basic-auth parser instead of fastapi.security.HTTPBasic, which
+    # decodes credentials as ASCII and therefore rejects any password with
+    # non-ASCII characters before it can even be compared. Browsers send
+    # UTF-8 (RFC 7617); fall back to latin-1 for older clients. Configured
+    # values are stripped — trailing whitespace/newlines are a common
+    # copy-paste artifact in hosting dashboards, not part of the password.
+    scheme, _, param = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() != "basic" or not param.strip():
+        raise _unauthorized()
+    try:
+        raw = base64.b64decode(param.strip())
+    except (binascii.Error, ValueError):
+        raise _unauthorized()
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        decoded = raw.decode("latin-1")
+    username, sep, password = decoded.partition(":")
+    if not sep:
+        raise _unauthorized()
+
+    user_ok = secrets.compare_digest(
+        username.encode("utf-8"), Config.DASHBOARD_USER.strip().encode("utf-8")
+    )
+    pass_ok = secrets.compare_digest(
+        password.encode("utf-8"), Config.DASHBOARD_PASS.strip().encode("utf-8")
+    )
     if not (user_ok and pass_ok):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
+        raise _unauthorized()
+    return username
+
+
+@app.get("/healthz")
+def healthz():
+    """Unauthenticated liveness/version probe."""
+    return {"ok": True, "app": "stox-options", "version": APP_VERSION}
 
 
 @app.get("/")
