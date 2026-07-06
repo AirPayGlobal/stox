@@ -156,7 +156,9 @@ All knobs live in `.env` (see `.env.example`). The ones that matter most:
 | `MAX_TRADES_PER_DAY` | 12 | Trade count cap |
 | `UNDERLYINGS` | SPY,QQQ | Symbols scanned |
 | `MAX_DTE` | 1 | 0 = same-day expiry only |
-| `TAKE_PROFIT_PCT` / `STOP_LOSS_PCT` | 0.50 / 0.30 | Exit levels on premium |
+| `PREMIUM_TARGET_PCT` / `PREMIUM_STOP_PCT` | 0.50 / 0.30 | Exit levels on premium |
+| `LOSS_COOLDOWN_MINUTES` | 30 | No re-entry on an underlying after a loss |
+| `MAX_CONSECUTIVE_LOSSES` | 3 | Per underlying per day, then done for the day |
 | `FLATTEN_TIME` | 15:50 | Everything closed by this ET time |
 
 ## What was rebuilt and why
