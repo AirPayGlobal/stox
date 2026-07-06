@@ -23,6 +23,10 @@ def _list(name: str, default: str) -> list:
     return [s.strip().upper() for s in os.getenv(name, default).split(",") if s.strip()]
 
 
+def _b(name: str, default: bool) -> bool:
+    return os.getenv(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
+
+
 class Config:
     # ------------------------------------------------------------ Broker
     ALPACA_API_KEY: str = os.getenv("ALPACA_API_KEY", "")
@@ -61,9 +65,21 @@ class Config:
     MIN_BID: float = _f("MIN_BID", 0.10)
 
     # ------------------------------------------------------------ Signals
+    # STRATEGY: "orb" (opening-range momentum), "sweep" (liquidity-sweep
+    # reversal), or "both".
+    STRATEGY: str = os.getenv("STRATEGY", "both").lower()
     BAR_MINUTES: int = _i("BAR_MINUTES", 5)
     OPENING_RANGE_MINUTES: int = _i("OPENING_RANGE_MINUTES", 15)
     SIGNAL_THRESHOLD: int = _i("SIGNAL_THRESHOLD", 70)       # score 0-100
+
+    # ------------------------------------------------------------ Sweep strategy
+    SWEEP_TIMEFRAME_MINUTES: int = _i("SWEEP_TIMEFRAME_MINUTES", 60)
+    SWEEP_RR: float = _f("SWEEP_RR", 2.0)                    # reward:risk target
+    SWEEP_TREND_FILTER: bool = _b("SWEEP_TREND_FILTER", False)
+    SWEEP_PREV_DAY_LEVELS: bool = _b("SWEEP_PREV_DAY_LEVELS", True)
+    SWEEP_ENTRY: str = os.getenv("SWEEP_ENTRY", "close").lower()  # "close" | "retrace"
+    SWEEP_RETRACE_EXPIRY_MIN: int = _i("SWEEP_RETRACE_EXPIRY_MIN", 60)
+    SWEEP_DISASTER_STOP_PCT: float = _f("SWEEP_DISASTER_STOP_PCT", 0.60)
 
     # ------------------------------------------------------------ Session (ET)
     ENTRY_START: str = os.getenv("ENTRY_START", "09:45")     # no entries before

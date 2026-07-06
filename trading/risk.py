@@ -94,6 +94,26 @@ class RiskManager:
         by_outlay = int((equity * Config.MAX_POSITION_PCT) // cost_per_contract)
         return max(0, min(by_risk, by_outlay, Config.MAX_CONTRACTS))
 
+    def contracts_for_underlying_stop(
+        self, equity: float, premium: float, delta: float | None, stop_distance: float
+    ) -> int:
+        """
+        Sizing for trades whose stop is an UNDERLYING price level: expected
+        option loss at the stop ~= |delta| * stop_distance per share. Falls
+        back to premium-based sizing when delta is unavailable.
+        """
+        if premium <= 0 or equity <= 0 or stop_distance <= 0:
+            return 0
+        if delta is None:
+            return self.contracts_for(equity, premium)
+
+        risk_per_contract = min(abs(delta) * stop_distance, premium) * 100
+        if risk_per_contract <= 0:
+            return 0
+        by_risk = int((equity * Config.RISK_PER_TRADE_PCT) // risk_per_contract)
+        by_outlay = int((equity * Config.MAX_POSITION_PCT) // (premium * 100))
+        return max(0, min(by_risk, by_outlay, Config.MAX_CONTRACTS))
+
     # ------------------------------------------------------------ Introspection
     def snapshot(self, equity: float) -> dict:
         s = self.state
