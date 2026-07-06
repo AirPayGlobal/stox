@@ -89,6 +89,10 @@ class Config:
     # ------------------------------------------------------------ Engine
     LOOP_SECONDS: int = _i("LOOP_SECONDS", 30)               # position-management tick
     SCAN_SECONDS: int = _i("SCAN_SECONDS", 300)              # entry-scan cadence
+    # Start the engine automatically when the server boots (dashboard Stop
+    # still works; set false to require pressing Start).
+    ENGINE_AUTOSTART: bool = _b("ENGINE_AUTOSTART", True)
+    ENGINE_AUTOSTART_DRY: bool = _b("ENGINE_AUTOSTART_DRY", False)
 
     # ------------------------------------------------------------ Dashboard
     DASHBOARD_USER: str = os.getenv("DASHBOARD_USER", "admin")

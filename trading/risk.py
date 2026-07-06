@@ -9,7 +9,9 @@ machine:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import json
+import os
+from dataclasses import asdict, dataclass, field
 from datetime import date
 
 from config import Config
@@ -28,8 +30,13 @@ class DayState:
 
 
 class RiskManager:
+    """Day state is persisted to disk so a restart or redeploy mid-session
+    keeps the same P&L baseline, trade count, and governor locks."""
+
     def __init__(self) -> None:
         self.state = DayState()
+        self._path = os.path.join(Config.STATE_DIR, "day_state.json")
+        self._load()
 
     # ------------------------------------------------------------ Day lifecycle
     def start_day(self, equity: float) -> None:
@@ -39,6 +46,7 @@ class RiskManager:
             f"target=+${Config.DAILY_PROFIT_TARGET:,.0f} "
             f"max_loss=-${Config.DAILY_MAX_LOSS:,.0f}"
         )
+        self._save()
 
     def ensure_today(self, equity: float) -> None:
         if self.state.day != date.today() or self.state.start_equity == 0:
@@ -54,9 +62,11 @@ class RiskManager:
         if not self.state.target_locked and pnl >= Config.DAILY_PROFIT_TARGET:
             self.state.target_locked = True
             logger.info(f"🎯 DAILY TARGET HIT: +${pnl:,.2f} — locking in, no new trades today")
+            self._save()
         if not self.state.loss_halted and pnl <= -Config.DAILY_MAX_LOSS:
             self.state.loss_halted = True
             logger.warning(f"🛑 DAILY MAX LOSS HIT: ${pnl:,.2f} — halting for the day")
+            self._save()
 
     def can_open(self, equity: float, open_positions: int) -> tuple[bool, str]:
         self.update_governor(equity)
@@ -76,6 +86,39 @@ class RiskManager:
 
     def record_open(self) -> None:
         self.state.trades_opened += 1
+        self._save()
+
+    # ------------------------------------------------------------ Persistence
+    def _save(self) -> None:
+        try:
+            os.makedirs(Config.STATE_DIR, exist_ok=True)
+            data = asdict(self.state)
+            data["day"] = self.state.day.isoformat()
+            with open(self._path, "w") as f:
+                json.dump(data, f)
+        except OSError as exc:
+            logger.warning(f"Could not persist day state: {exc}")
+
+    def _load(self) -> None:
+        try:
+            with open(self._path) as f:
+                raw = json.load(f)
+            if raw.get("day") == date.today().isoformat():
+                self.state = DayState(
+                    day=date.today(),
+                    start_equity=float(raw.get("start_equity", 0.0)),
+                    trades_opened=int(raw.get("trades_opened", 0)),
+                    target_locked=bool(raw.get("target_locked", False)),
+                    loss_halted=bool(raw.get("loss_halted", False)),
+                )
+                logger.info(
+                    f"Restored day state | baseline=${self.state.start_equity:,.2f} "
+                    f"trades={self.state.trades_opened}"
+                )
+        except FileNotFoundError:
+            pass
+        except (OSError, ValueError, TypeError) as exc:
+            logger.warning(f"Could not load day state: {exc}")
 
     # ------------------------------------------------------------ Sizing
     def contracts_for(self, equity: float, premium: float) -> int:
