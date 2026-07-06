@@ -38,10 +38,15 @@ class Config:
     UNDERLYINGS: list = _list("UNDERLYINGS", "SPY,QQQ")
 
     # ------------------------------------------------------------ Daily governor
-    # The engine stops opening trades once day P&L >= target, and halts
-    # completely (flattening everything) once day loss <= -max loss.
+    # Hitting the profit target does NOT stop trading — it arms profit
+    # protection: a trailing floor under day P&L that ratchets up with the
+    # day's peak. Only if P&L falls back to the floor does the engine bank
+    # the day (flatten + stop). The loss side is a hard halt.
     DAILY_PROFIT_TARGET: float = _f("DAILY_PROFIT_TARGET", 5000.0)
     DAILY_MAX_LOSS: float = _f("DAILY_MAX_LOSS", 2500.0)
+    # Floor = max(target * PROFIT_FLOOR_PCT, peak * (1 - PROFIT_GIVEBACK_PCT))
+    PROFIT_FLOOR_PCT: float = _f("PROFIT_FLOOR_PCT", 0.70)      # keep >= 70% of target
+    PROFIT_GIVEBACK_PCT: float = _f("PROFIT_GIVEBACK_PCT", 0.30)  # give back <= 30% of peak
     MAX_TRADES_PER_DAY: int = _i("MAX_TRADES_PER_DAY", 12)
     MAX_CONCURRENT_POSITIONS: int = _i("MAX_CONCURRENT_POSITIONS", 3)
 
@@ -106,6 +111,10 @@ class Config:
     SWEEP_ENTRY: str = os.getenv("SWEEP_ENTRY", "close").lower()  # "close" | "retrace"
     SWEEP_RETRACE_EXPIRY_MIN: int = _i("SWEEP_RETRACE_EXPIRY_MIN", 60)
     SWEEP_DISASTER_STOP_PCT: float = _f("SWEEP_DISASTER_STOP_PCT", 0.60)
+    # Skip sweep setups whose wick stop is closer than this fraction of spot:
+    # near-zero stop distance lets "1% risk" sizing balloon to the outlay cap,
+    # and slippage makes the theoretical risk fictional (backtest artifact #2).
+    SWEEP_MIN_STOP_PCT: float = _f("SWEEP_MIN_STOP_PCT", 0.0015)
 
     # ------------------------------------------------------------ Session (ET)
     ENTRY_START: str = os.getenv("ENTRY_START", "09:45")     # no entries before

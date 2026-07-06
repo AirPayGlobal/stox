@@ -160,7 +160,8 @@ All knobs live in `.env` (see `.env.example`). The ones that matter most:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DAILY_PROFIT_TARGET` | 5000 | Stop opening trades once day P&L ≥ this |
+| `DAILY_PROFIT_TARGET` | 5000 | Arms profit protection (trading continues) |
+| `PROFIT_GIVEBACK_PCT` / `PROFIT_FLOOR_PCT` | 0.30 / 0.70 | Trailing floor: give back ≤30% of peak, keep ≥70% of target |
 | `DAILY_MAX_LOSS` | 2500 | Flatten + halt once day P&L ≤ −this |
 | `RISK_PER_TRADE_PCT` | 0.01 | Max loss at the stop per trade (fraction of equity) |
 | `MAX_CONCURRENT_POSITIONS` | 3 | Open positions cap |

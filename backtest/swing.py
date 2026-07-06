@@ -93,7 +93,7 @@ def simulate_swing(symbol: str, bars: pd.DataFrame, equity: float) -> list[dict]
         acted.add(sig.candle_ts)
 
         stop = sig.extreme
-        if abs(spot - stop) < 0.01:
+        if abs(spot - stop) < max(0.01, spot * Config.SWEEP_MIN_STOP_PCT):
             continue
         target = rr_target(spot, stop, Config.SWING_RR)
 

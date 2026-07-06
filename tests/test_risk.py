@@ -14,15 +14,47 @@ def test_can_open_normally():
     assert ok, why
 
 
-def test_profit_target_locks_day():
+def test_target_hit_does_not_stop_trading():
     rm = make_rm(100_000)
-    equity_after_target = 100_000 + Config.DAILY_PROFIT_TARGET
-    ok, why = rm.can_open(equity=equity_after_target, open_positions=0)
+    equity_at_target = 100_000 + Config.DAILY_PROFIT_TARGET
+    ok, why = rm.can_open(equity=equity_at_target, open_positions=0)
+    assert ok, why
+    assert rm.state.target_hit
+    assert not rm.must_flatten()
+
+
+def test_profit_floor_ratchets_with_peak():
+    rm = make_rm(100_000)
+    rm.update_governor(equity=110_000)  # peak +10k
+    # floor = max(5000*0.7, 10000*(1-0.3)) = 7000
+    assert rm.profit_floor() == 7_000
+    rm.update_governor(equity=115_000)  # peak +15k -> floor 10500
+    assert rm.profit_floor() == 10_500
+    # Peak never ratchets down.
+    rm.update_governor(equity=112_000)
+    assert rm.state.peak_pnl == 15_000
+
+
+def test_giveback_floor_banks_the_day():
+    rm = make_rm(100_000)
+    rm.update_governor(equity=110_000)   # target hit, peak +10k, floor +7k
+    ok, _ = rm.can_open(equity=110_000, open_positions=0)
+    assert ok
+    ok, why = rm.can_open(equity=106_900, open_positions=0)  # +6.9k <= floor
     assert not ok
-    assert "target" in why
-    # Sticky: even if P&L drops back below the target, stay locked.
-    ok, _ = rm.can_open(equity=100_000 + 100, open_positions=0)
+    assert "profit protection" in why
+    assert rm.must_flatten()
+    assert rm.flatten_reason() == "PROTECT"
+    # Sticky even if P&L bounces back above the floor.
+    ok, _ = rm.can_open(equity=112_000, open_positions=0)
     assert not ok
+
+
+def test_floor_at_exact_target():
+    rm = make_rm(100_000)
+    rm.update_governor(equity=100_000 + Config.DAILY_PROFIT_TARGET)
+    # At the target both floor terms coincide: keep 70% of the target.
+    assert rm.profit_floor() == Config.DAILY_PROFIT_TARGET * Config.PROFIT_FLOOR_PCT
 
 
 def test_max_loss_halts_and_flattens():
@@ -31,6 +63,7 @@ def test_max_loss_halts_and_flattens():
     assert not ok
     assert "loss" in why
     assert rm.must_flatten()
+    assert rm.flatten_reason() == "HALT"
 
 
 def test_max_concurrent_positions():
@@ -68,7 +101,8 @@ def test_sizing_zero_when_unaffordable():
 
 def test_new_day_resets_state():
     rm = make_rm(100_000)
-    rm.state.target_locked = True
+    rm.state.protect_locked = True
+    rm.state.loss_halted = True
     rm.start_day(120_000)
     ok, _ = rm.can_open(equity=120_000, open_positions=0)
     assert ok
