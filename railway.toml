@@ -5,5 +5,9 @@ dockerfilePath = "Dockerfile"
 [deploy]
 # No startCommand override: Railway execs it without a shell, so "$PORT"
 # would be passed literally. The Dockerfile CMD (shell form) handles PORT.
+# Health check gates traffic cutover so redeploys don't serve 502s while
+# the new container is still booting.
+healthcheckPath = "/healthz"
+healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 3
