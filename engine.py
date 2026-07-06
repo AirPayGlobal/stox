@@ -38,12 +38,13 @@ from analysis.sweeps import (
 )
 from config import Config
 from data.market_data import get_intraday_bars, get_latest_price, get_today_bars
-from data.options_data import get_option_mid
+from data.options_data import _parse_occ, get_option_mid
 from options.contracts import select_contract
 from trading.broker import (
     buy_option,
     close_option_position,
     get_account,
+    get_option_positions,
     is_market_open,
 )
 from trading.positions import PositionBook
@@ -82,6 +83,11 @@ class TradingEngine:
     def run(self) -> None:
         self.running = True
         logger.info("Engine loop started")
+        if not self.dry_run:
+            try:
+                self.reconcile_with_broker()
+            except Exception as exc:
+                logger.error(f"Broker reconciliation failed: {exc}", exc_info=True)
         while self.running:
             try:
                 self.tick()
@@ -91,6 +97,44 @@ class TradingEngine:
 
     def stop(self) -> None:
         self.running = False
+
+    def reconcile_with_broker(self) -> None:
+        """
+        Align the position book with the broker's actual option positions.
+        Runs at engine start so a restart that lost (or never had) state
+        cannot leave positions unmanaged:
+          * broker position unknown to the book -> ADOPT it (broker average
+            entry as the premium basis) so stops/flatten/halt govern it
+          * book trade the broker no longer holds -> close it as EXTERNAL
+        """
+        broker_positions = get_option_positions()
+        known = {t.symbol for t in self.book.open_trades}
+
+        for symbol, pos in broker_positions.items():
+            if symbol in known:
+                continue
+            strike, opt_type = _parse_occ(symbol)
+            if strike is None:
+                logger.warning(f"Unrecognized option symbol at broker: {symbol}")
+                continue
+            underlying = symbol[:-15]
+            direction = "LONG" if opt_type == "call" else "SHORT"
+            self.book.open(
+                symbol, underlying, direction, pos["qty"], pos["avg_entry"],
+                strategy="orb",  # premium-based exits govern adopted trades
+            )
+            logger.warning(
+                f"ADOPTED orphaned broker position: {pos['qty']}x {symbol} "
+                f"@ ${pos['avg_entry']:.2f} — now managed"
+            )
+
+        for trade in list(self.book.open_trades):
+            if trade.symbol not in broker_positions:
+                mark = get_option_mid(trade.symbol) or trade.entry_premium
+                self.book.close(trade.symbol, mark, "EXTERNAL")
+                logger.warning(
+                    f"Book trade {trade.symbol} not held at broker — closed as EXTERNAL"
+                )
 
     def tick(self) -> None:
         if not is_market_open():
@@ -259,8 +303,12 @@ class TradingEngine:
         sig = self._detect_sweep(bars, today_bars, bars_ext)
         cache_key = f"{underlying}·sweep"
         if sig is None:
-            self.last_signals.setdefault(cache_key, {"signal": "FLAT"})
-            self.last_signals[cache_key]["at"] = datetime.now(ET).isoformat(timespec="seconds")
+            self.last_signals[cache_key] = {
+                "signal": "FLAT",
+                "score": 0,
+                "price": round(spot, 2),
+                "at": datetime.now(ET).isoformat(timespec="seconds"),
+            }
             return
 
         dedupe = f"{underlying}|{sig.kind}|{sig.candle_ts}"

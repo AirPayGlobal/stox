@@ -112,4 +112,11 @@ class Config:
 
     # ------------------------------------------------------------ Misc
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
-    STATE_DIR: str = os.getenv("STATE_DIR", "logs")
+    # State (trade book, day baseline, logs) must survive redeploys or the
+    # engine loses its memory mid-session. If a persistent volume is mounted
+    # at /data (Railway convention), use it automatically; STATE_DIR
+    # overrides.
+    STATE_DIR: str = os.getenv(
+        "STATE_DIR",
+        "/data" if os.path.isdir("/data") and os.access("/data", os.W_OK) else "logs",
+    )

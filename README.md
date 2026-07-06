@@ -137,6 +137,17 @@ running). Set `ENGINE_AUTOSTART=false` to require pressing ▶ Start instead,
 or `ENGINE_AUTOSTART_DRY=true` to auto-start in signals-only dry-run mode.
 Day P&L baseline, trade counts, and governor locks persist across restarts.
 
+At startup the engine **reconciles with the broker**: option positions the
+book doesn't know about (e.g. opened before a restart that lost state) are
+adopted and put under stop/flatten management; book entries the broker no
+longer holds are closed as `EXTERNAL`.
+
+> **Deploying on Railway (or any ephemeral-filesystem host)?** Attach a
+> persistent **Volume** mounted at `/data` — the app uses it automatically
+> for the trade book, day baseline, and logs (`STATE_DIR` overrides).
+> Without one, every redeploy wipes state mid-session; broker
+> reconciliation limits the damage, but the day P&L baseline still resets.
+
 **Tests**:
 
 ```bash
