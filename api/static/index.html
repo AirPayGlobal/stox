@@ -126,7 +126,9 @@ async function refresh() {
   bar.className = pnl < 0 ? "neg" : "";
   document.getElementById("pnl-text").textContent =
     ` — ${money(pnl)} of +$${fmt(target,0)}` +
-    (r.protect_locked ? ` · 🔒 DAY BANKED at floor ${money(r.profit_floor)}` :
+    (r.protect_locked ? (r.protect_mode === "flatten"
+        ? ` · 🔒 DAY BANKED at floor ${money(r.profit_floor)}`
+        : ` · 🔒 PROTECTED — no new trades, open positions running`) :
      r.target_hit ? ` · 🎯 target hit — trailing floor ${money(r.profit_floor)} (peak ${money(r.peak_pnl)})` : "") +
     (r.loss_halted ? " · 🛑 HALTED" : "");
 

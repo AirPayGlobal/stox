@@ -87,9 +87,14 @@ class RiskManager:
             self._save()
         if s.target_hit and not s.protect_locked and pnl <= self.profit_floor():
             s.protect_locked = True
+            action = (
+                "banking the day (flattening)"
+                if Config.PROTECT_MODE == "flatten"
+                else "no new trades; open positions run to their own exits"
+            )
             logger.info(
                 f"🔒 PROFIT PROTECTION: day P&L ${pnl:,.2f} fell to the floor "
-                f"(+${self.profit_floor():,.0f}) — banking the day"
+                f"(+${self.profit_floor():,.0f}) — {action}"
             )
             self._save()
         if not s.loss_halted and pnl <= -Config.DAILY_MAX_LOSS:
@@ -111,12 +116,16 @@ class RiskManager:
         return True, ""
 
     def must_flatten(self) -> bool:
-        return self.state.loss_halted or self.state.protect_locked
+        if self.state.loss_halted:
+            return True
+        # In "hold" mode the floor only blocks new entries; open positions
+        # keep running to their own stops/targets.
+        return self.state.protect_locked and Config.PROTECT_MODE == "flatten"
 
     def flatten_reason(self) -> str:
         if self.state.loss_halted:
             return "HALT"
-        if self.state.protect_locked:
+        if self.state.protect_locked and Config.PROTECT_MODE == "flatten":
             return "PROTECT"
         return "FLATTEN"
 
@@ -209,5 +218,6 @@ class RiskManager:
             "target_hit": s.target_hit,
             "profit_floor": round(self.profit_floor(), 2) if s.target_hit else None,
             "protect_locked": s.protect_locked,
+            "protect_mode": Config.PROTECT_MODE,
             "loss_halted": s.loss_halted,
         }
