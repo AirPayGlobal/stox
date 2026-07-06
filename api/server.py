@@ -1,128 +1,88 @@
 """
-STOX Dashboard API
-==================
-FastAPI backend that exposes account data, positions, trades, portfolio
-metrics, and bot control endpoints. In production it also serves the
-compiled React SPA from dashboard/dist/.
+FastAPI dashboard + engine control.
+
+    uvicorn api.server:app --host 0.0.0.0 --port 8000
+
+Endpoints (HTTP basic auth):
+    GET  /              dashboard UI
+    GET  /api/status    engine + risk + signals snapshot
+    GET  /api/trades    today's closed trades
+    POST /api/start     start engine (?dry_run=true for signals-only)
+    POST /api/stop      stop engine
 """
 from __future__ import annotations
 
 import os
 import secrets
-from dataclasses import asdict
-from pathlib import Path
-from typing import Any
+import threading
 
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
-from fastapi.staticfiles import StaticFiles
 
-from api.bot_manager import bot_manager
 from config import Config
-from trading.alpaca_client import get_account, get_positions
-from trading.portfolio import Portfolio
+from engine import TradingEngine
 from utils.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("api")
 
-app = FastAPI(title="STOX Dashboard", docs_url=None, redoc_url=None)
+app = FastAPI(title="STOX Options", docs_url=None, redoc_url=None)
 security = HTTPBasic()
 
-_DASHBOARD_USER = os.getenv("DASHBOARD_USER", "admin")
-_DASHBOARD_PASS = os.getenv("DASHBOARD_PASS", "stox")
+_engine: TradingEngine | None = None
+_thread: threading.Thread | None = None
+_lock = threading.Lock()
+
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
-# ------------------------------------------------------------------ Auth
-
-def verify(credentials: HTTPBasicCredentials = Depends(security)) -> str:
-    ok_user = secrets.compare_digest(
-        credentials.username.encode(), _DASHBOARD_USER.encode()
-    )
-    ok_pass = secrets.compare_digest(
-        credentials.password.encode(), _DASHBOARD_PASS.encode()
-    )
-    if not (ok_user and ok_pass):
+def _auth(credentials: HTTPBasicCredentials = Depends(security)) -> str:
+    user_ok = secrets.compare_digest(credentials.username, Config.DASHBOARD_USER)
+    pass_ok = secrets.compare_digest(credentials.password, Config.DASHBOARD_PASS)
+    if not (user_ok and pass_ok):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
             headers={"WWW-Authenticate": "Basic"},
         )
     return credentials.username
 
 
-# ------------------------------------------------------------------ API
-
-@app.get("/health")
-def health() -> dict:
-    """Railway health check — no auth required."""
-    return {"status": "ok"}
+@app.get("/")
+def index(_: str = Depends(_auth)):
+    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
-@app.get("/api/account")
-def account(_: str = Depends(verify)) -> dict[str, Any]:
-    try:
-        return get_account()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
-
-
-@app.get("/api/positions")
-def positions(_: str = Depends(verify)) -> dict[str, Any]:
-    try:
-        return get_positions()
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+@app.get("/api/status")
+def api_status(_: str = Depends(_auth)):
+    if _engine is None:
+        return {"running": False, "mode": Config.ALPACA_MODE, "message": "engine not started"}
+    return _engine.status()
 
 
 @app.get("/api/trades")
-def trades(_: str = Depends(verify)) -> dict[str, Any]:
-    p = Portfolio()
-    return {"trades": [asdict(t) for t in reversed(p.trades)]}
+def api_trades(_: str = Depends(_auth)):
+    if _engine is None:
+        return []
+    return [vars(t) for t in _engine.book.closed_today()]
 
 
-@app.get("/api/summary")
-def summary(_: str = Depends(verify)) -> dict[str, Any]:
-    return Portfolio().summary()
+@app.post("/api/start")
+def api_start(dry_run: bool = False, _: str = Depends(_auth)):
+    global _engine, _thread
+    with _lock:
+        if _thread and _thread.is_alive():
+            return {"ok": False, "message": "engine already running"}
+        _engine = TradingEngine(dry_run=dry_run)
+        _thread = threading.Thread(target=_engine.run, daemon=True)
+        _thread.start()
+    logger.info(f"Engine started via API (dry_run={dry_run})")
+    return {"ok": True, "dry_run": dry_run}
 
 
-@app.get("/api/equity-curve")
-def equity_curve(_: str = Depends(verify)) -> dict[str, Any]:
-    p = Portfolio()
-    return {"snapshots": [asdict(s) for s in p.snapshots]}
-
-
-@app.get("/api/bot/status")
-def bot_status(_: str = Depends(verify)) -> dict[str, Any]:
-    return bot_manager.get_status()
-
-
-@app.post("/api/bot/start")
-def bot_start(dry_run: bool = False, _: str = Depends(verify)) -> dict[str, Any]:
-    return bot_manager.start(dry_run=dry_run)
-
-
-@app.post("/api/bot/stop")
-def bot_stop(_: str = Depends(verify)) -> dict[str, Any]:
-    return bot_manager.stop()
-
-
-# ------------------------------------------------------------------ SPA
-
-_DIST = Path(__file__).parent.parent / "dashboard" / "dist"
-
-if _DIST.exists():
-    # Serve static assets (JS/CSS bundles) without auth
-    _assets = _DIST / "assets"
-    if _assets.exists():
-        app.mount("/assets", StaticFiles(directory=str(_assets)), name="assets")
-
-    @app.get("/{full_path:path}")
-    def spa(full_path: str, _: str = Depends(verify)) -> FileResponse:
-        """Serve the React SPA for all non-API routes."""
-        return FileResponse(str(_DIST / "index.html"))
-else:
-    logger.warning(
-        "React build not found at dashboard/dist. "
-        "Run `npm run build` inside the dashboard/ directory."
-    )
+@app.post("/api/stop")
+def api_stop(_: str = Depends(_auth)):
+    if _engine is None or not _engine.running:
+        return {"ok": False, "message": "engine not running"}
+    _engine.stop()
+    logger.info("Engine stopped via API")
+    return {"ok": True}

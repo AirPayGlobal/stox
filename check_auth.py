@@ -1,71 +1,49 @@
 """
-Alpaca credential validator — run this before starting the bot.
+Credential diagnostic — verifies trading API, market data API, and options
+permissions in one go.
 
-Usage:
     python check_auth.py
-
-Checks that ALPACA_API_KEY / ALPACA_API_SECRET are set and valid by making a
-live /v2/account request. Also prints the equivalent curl command for manual
-testing.
 """
-from __future__ import annotations
-
-import sys
-
-from dotenv import load_dotenv
-
-load_dotenv()
-
-from config import Config  # noqa: E402 — load_dotenv must run first
-
-
-def _mask(value: str) -> str:
-    if not value or len(value) < 8:
-        return "(not set)"
-    return value[:4] + "*" * (len(value) - 8) + value[-4:]
+from config import Config
 
 
 def main() -> None:
-    print("\n=== Alpaca Credential Check ===\n")
-
+    print(f"Mode: {Config.ALPACA_MODE}")
     key = Config.ALPACA_API_KEY
-    secret = Config.ALPACA_API_SECRET
-    mode = Config.ALPACA_MODE
-    base_url = Config.alpaca_base_url()
+    print(f"Key : {key[:4]}…{key[-4:]}" if len(key) > 8 else "Key : NOT SET")
 
-    print(f"  ALPACA_MODE       : {mode}")
-    print(f"  ALPACA_API_KEY    : {_mask(key)}")
-    print(f"  ALPACA_API_SECRET : {_mask(secret)}")
-    print(f"  Base URL          : {base_url}\n")
-
-    if not key or not secret:
-        print("ERROR: One or both API keys are missing.")
-        print("  1. Copy .env.example to .env")
-        print("  2. Add your keys from https://app.alpaca.markets/paper/dashboard/overview\n")
-        sys.exit(1)
-
-    print("Equivalent curl command for manual testing:")
-    print(f'  curl -H "APCA-API-KEY-ID: {key}" \\')
-    print(f'       -H "APCA-API-SECRET-KEY: {secret[:4]}..." \\')
-    print(f"       {base_url}/v2/account\n")
-
-    print("Testing connection to Alpaca...")
+    # 1. Trading API
     try:
-        from trading.alpaca_client import validate_credentials
-        ok, msg = validate_credentials()
-    except Exception as exc:
-        print(f"ERROR: Unexpected error during check: {exc}\n")
-        sys.exit(1)
+        from trading.broker import get_account
 
-    if ok:
-        print(f"Authentication OK  —  {msg}\n")
-    else:
-        print(f"Authentication FAILED: {msg}")
-        print("\nCommon fixes:")
-        print("  - Make sure you copied the Paper Trading keys (not Live)")
-        print("  - Re-generate keys at https://app.alpaca.markets/paper/dashboard/overview")
-        print("  - Ensure ALPACA_MODE=paper in your .env when using paper keys\n")
-        sys.exit(1)
+        acct = get_account()
+        print(
+            f"✓ Trading API OK — equity ${acct['equity']:,.2f}, "
+            f"options level {acct['options_level']}"
+        )
+        if acct["options_level"] < 1:
+            print("  ⚠ Options trading NOT enabled — enable it in the Alpaca dashboard")
+    except Exception as exc:
+        print(f"✗ Trading API failed: {exc}")
+        return
+
+    # 2. Stock data API
+    try:
+        from data.market_data import get_latest_price
+
+        price = get_latest_price("SPY")
+        print(f"✓ Stock data OK — SPY last ${price:,.2f}")
+    except Exception as exc:
+        print(f"✗ Stock data failed: {exc}")
+
+    # 3. Options data API
+    try:
+        from data.options_data import nearest_expiry
+
+        expiry = nearest_expiry("SPY", max_dte=5)
+        print(f"✓ Options data OK — nearest SPY expiry {expiry}")
+    except Exception as exc:
+        print(f"✗ Options data failed: {exc}")
 
 
 if __name__ == "__main__":

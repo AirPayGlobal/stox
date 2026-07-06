@@ -1,149 +1,97 @@
 """
-Signal generation: combines indicator readings into BUY / SELL / HOLD decisions.
+Intraday directional signal for the underlying.
 
-Signal scoring (0-100):
-  - Each condition adds points; threshold determines action.
-  - Requires multiple confirming signals to reduce false positives.
+The score (0-100) measures confluence of five components on intraday bars.
+A direction fires only when BOTH hold, otherwise the signal is FLAT:
+  * price has actually broken the opening range in that direction (hard
+    gate — without it, drifting chop can accumulate enough soft points)
+  * total score >= Config.SIGNAL_THRESHOLD
+
+Components (long side shown; short side is the mirror image):
+  * price above session VWAP ................ 25
+  * price above the opening-range high ...... 25
+  * EMA9 above EMA21 ......................... 20
+  * net upward move over the last 3 bars .... 15
+  * RSI not already overbought (< 70) ....... 15
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from enum import Enum
 
 import pandas as pd
 
+from analysis.indicators import ema, opening_range, rsi, session_vwap
 from config import Config
-from analysis.indicators import add_all_indicators, ema_crossover_up, ema_crossover_down, is_above_trend
-from utils.logger import get_logger
-
-logger = get_logger(__name__)
 
 
-class Signal(str, Enum):
-    BUY = "BUY"
-    SELL = "SELL"
-    HOLD = "HOLD"
+class Signal(Enum):
+    LONG = "LONG"
+    SHORT = "SHORT"
+    FLAT = "FLAT"
 
 
-BUY_THRESHOLD = 60    # score out of 100 required to issue a BUY
-SELL_THRESHOLD = 60   # score required to issue a SELL
+@dataclass
+class SignalResult:
+    signal: Signal
+    score: int              # score of the winning direction
+    long_score: int
+    short_score: int
+    price: float
+    details: dict = field(default_factory=dict)
 
 
-def _score_buy(row: pd.Series, prev: pd.Series) -> int:
-    """Score a BUY signal for the latest bar (0-100)."""
-    score = 0
-
-    # 1. Price above long-term trend EMA (20 pts)
-    if row["close"] > row["ema_trend"]:
-        score += 20
-
-    # 2. Fast EMA above slow EMA — uptrend in progress (15 pts)
-    if row["ema_fast"] > row["ema_slow"]:
-        score += 15
-
-    # 3. EMA golden cross on this bar (20 pts — strong signal)
-    if row["ema_fast"] > row["ema_slow"] and prev["ema_fast"] <= prev["ema_slow"]:
-        score += 20
-
-    # 4. RSI in bullish zone — not overbought (15 pts)
-    if Config.RSI_OVERSOLD <= row["rsi"] <= Config.RSI_OVERBOUGHT:
-        score += 15
-
-    # 5. MACD histogram turning positive (15 pts)
-    if row["macd_hist"] > 0 and prev["macd_hist"] <= 0:
-        score += 15
-    elif row["macd_hist"] > 0:
-        score += 7
-
-    # 6. Price near/below Bollinger mid-band — room to run upward (10 pts)
-    if row["bb_pct"] < 0.55:
-        score += 10
-
-    # 7. Above-average volume — institutional participation (5 pts)
-    if row["volume"] > row["volume_sma"] * 1.1:
-        score += 5
-
-    return min(score, 100)
+MIN_BARS = 6  # need the opening range plus a few bars of trend
 
 
-def _score_sell(row: pd.Series, prev: pd.Series) -> int:
-    """Score a SELL signal for the latest bar (0-100)."""
-    score = 0
-
-    # 1. EMA death cross — fast crosses below slow (25 pts)
-    if row["ema_fast"] < row["ema_slow"] and prev["ema_fast"] >= prev["ema_slow"]:
-        score += 25
-
-    # 2. Fast EMA below slow EMA — downtrend (15 pts)
-    if row["ema_fast"] < row["ema_slow"]:
-        score += 15
-
-    # 3. RSI overbought (20 pts)
-    if row["rsi"] > Config.RSI_OVERBOUGHT:
-        score += 20
-
-    # 4. MACD histogram turning negative (20 pts)
-    if row["macd_hist"] < 0 and prev["macd_hist"] >= 0:
-        score += 20
-    elif row["macd_hist"] < 0:
-        score += 8
-
-    # 5. Price near upper Bollinger Band — stretched (15 pts)
-    if row["bb_pct"] > 0.85:
-        score += 15
-
-    # 6. Price below trend EMA (5 pts)
-    if row["close"] < row["ema_trend"]:
-        score += 5
-
-    return min(score, 100)
-
-
-def generate_signal(df: pd.DataFrame) -> tuple[Signal, int]:
+def generate_signal(session_df: pd.DataFrame) -> SignalResult:
     """
-    Given a DataFrame with OHLCV data, compute indicators and return
-    the latest bar's signal plus its confidence score.
-
-    Returns (Signal, score).
+    `session_df` — one session of intraday bars (open/high/low/close/volume),
+    oldest first. Uses only completed bars.
     """
-    if len(df) < Config.EMA_TREND + 10:
-        return Signal.HOLD, 0
+    if len(session_df) < MIN_BARS:
+        return SignalResult(Signal.FLAT, 0, 0, 0, price=0.0)
 
-    df = add_all_indicators(df)
-    df = df.dropna(subset=["ema_fast", "ema_slow", "ema_trend", "rsi", "macd_hist", "bb_pct"])
+    close = session_df["close"]
+    price = float(close.iloc[-1])
 
-    if len(df) < 2:
-        return Signal.HOLD, 0
+    vwap = float(session_vwap(session_df).iloc[-1])
+    or_high, or_low = opening_range(session_df, Config.OPENING_RANGE_MINUTES)
+    ema_fast = float(ema(close, 9).iloc[-1])
+    ema_slow = float(ema(close, 21).iloc[-1])
+    rsi_val = float(rsi(close, 14).iloc[-1])
+    move3 = float(close.iloc[-1] - close.iloc[-4])
 
-    latest = df.iloc[-1]
-    prev = df.iloc[-2]
+    long_score = (
+        (25 if price > vwap else 0)
+        + (25 if price > or_high else 0)
+        + (20 if ema_fast > ema_slow else 0)
+        + (15 if move3 > 0 else 0)
+        + (15 if rsi_val < 70 else 0)
+    )
+    short_score = (
+        (25 if price < vwap else 0)
+        + (25 if price < or_low else 0)
+        + (20 if ema_fast < ema_slow else 0)
+        + (15 if move3 < 0 else 0)
+        + (15 if rsi_val > 30 else 0)
+    )
 
-    buy_score = _score_buy(latest, prev)
-    sell_score = _score_sell(latest, prev)
+    details = {
+        "price": round(price, 2),
+        "vwap": round(vwap, 2),
+        "or_high": round(or_high, 2),
+        "or_low": round(or_low, 2),
+        "ema9": round(ema_fast, 2),
+        "ema21": round(ema_slow, 2),
+        "rsi": round(rsi_val, 1),
+    }
 
-    if buy_score >= BUY_THRESHOLD and buy_score > sell_score:
-        return Signal.BUY, buy_score
-    elif sell_score >= SELL_THRESHOLD and sell_score > buy_score:
-        return Signal.SELL, sell_score
-    else:
-        return Signal.HOLD, max(buy_score, sell_score)
-
-
-def screen_universe(
-    data: dict[str, pd.DataFrame],
-) -> list[tuple[str, Signal, int]]:
-    """
-    Run signal generation across the entire watchlist.
-    Returns list of (symbol, signal, score) sorted by score descending.
-    """
-    results = []
-    for symbol, df in data.items():
-        try:
-            signal, score = generate_signal(df)
-            if signal != Signal.HOLD:
-                results.append((symbol, signal, score))
-                logger.info(f"{symbol}: {signal.value} (score={score})")
-        except Exception as exc:
-            logger.warning(f"Signal error for {symbol}: {exc}")
-
-    results.sort(key=lambda x: x[2], reverse=True)
-    return results
+    threshold = Config.SIGNAL_THRESHOLD
+    broke_high = price > or_high
+    broke_low = price < or_low
+    if broke_high and long_score >= threshold and long_score > short_score:
+        return SignalResult(Signal.LONG, long_score, long_score, short_score, price, details)
+    if broke_low and short_score >= threshold and short_score > long_score:
+        return SignalResult(Signal.SHORT, short_score, long_score, short_score, price, details)
+    return SignalResult(Signal.FLAT, max(long_score, short_score), long_score, short_score, price, details)
