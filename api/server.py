@@ -85,6 +85,26 @@ def healthz():
     return {"ok": True, "app": "stox-options", "version": APP_VERSION}
 
 
+@app.get("/authz-debug")
+def authz_debug():
+    """
+    TEMPORARY credential-configuration diagnostic. Reveals whether the
+    running container actually received custom DASHBOARD_USER/PASS values,
+    WITHOUT exposing the password itself (only its length). Remove once the
+    login issue is resolved.
+    """
+    user = Config.DASHBOARD_USER.strip()
+    pw = Config.DASHBOARD_PASS.strip()
+    return {
+        "configured_user": user,
+        "user_is_default": user == "admin",
+        "password_length": len(pw),
+        "password_is_default": pw == "changeme",
+        "password_ascii_only": pw.isascii(),
+        "raw_password_had_surrounding_whitespace": pw != Config.DASHBOARD_PASS,
+    }
+
+
 @app.get("/")
 def index(_: str = Depends(_auth)):
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
