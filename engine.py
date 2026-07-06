@@ -30,6 +30,8 @@ from analysis.signals import Signal, generate_signal
 from analysis.sweeps import (
     SweepSignal,
     find_fvg,
+    level_sweep,
+    overnight_range,
     prev_day_level_sweep,
     rr_target,
     sweep_reclaim,
@@ -221,7 +223,12 @@ class TradingEngine:
 
     # ------------------------------------------------------------ Sweep reversal
     def _scan_sweep(self, underlying: str, equity: float) -> None:
-        bars = get_intraday_bars(underlying, lookback_days=4)
+        # Extended-hours bars: the overnight/pre-market range needs them;
+        # everything else uses the RTH subset.
+        bars_ext = get_intraday_bars(underlying, lookback_days=4, rth_only=False)
+        if bars_ext.empty:
+            return
+        bars = bars_ext.between_time("09:30", "16:00")
         if bars.empty:
             return
         today = datetime.now(ET).date()
@@ -230,7 +237,7 @@ class TradingEngine:
             return
         spot = float(today_bars["close"].iloc[-1])
 
-        sig = self._detect_sweep(bars, today_bars)
+        sig = self._detect_sweep(bars, today_bars, bars_ext)
         cache_key = f"{underlying}·sweep"
         if sig is None:
             self.last_signals.setdefault(cache_key, {"signal": "FLAT"})
@@ -264,23 +271,30 @@ class TradingEngine:
                 note=f"{sig.kind} swept={sig.swept_level:.2f}",
             )
 
-    def _detect_sweep(self, bars, today_bars) -> SweepSignal | None:
+    def _detect_sweep(self, bars, today_bars, bars_ext=None) -> SweepSignal | None:
         now = datetime.now(ET)
         htf = resample_bars(bars, Config.SWEEP_TIMEFRAME_MINUTES)
         htf = completed_bars(htf, Config.SWEEP_TIMEFRAME_MINUTES, now)
         sig = sweep_reclaim(htf.tail(2), trend_filter=Config.SWEEP_TREND_FILTER)
         if sig:
             return sig
+
+        completed_today = completed_bars(today_bars, Config.BAR_MINUTES, now)
         if Config.SWEEP_PREV_DAY_LEVELS:
             prev_days = bars[bars.index.date < now.date()]
             if not prev_days.empty:
                 last_day = prev_days[prev_days.index.date == prev_days.index.date[-1]]
-                completed_today = completed_bars(today_bars, Config.BAR_MINUTES, now)
-                return prev_day_level_sweep(
+                sig = prev_day_level_sweep(
                     completed_today,
                     prev_day_high=float(last_day["high"].max()),
                     prev_day_low=float(last_day["low"].min()),
                 )
+                if sig:
+                    return sig
+        if Config.SWEEP_OVERNIGHT_RANGE and bars_ext is not None:
+            rng = overnight_range(bars_ext, now.date())
+            if rng:
+                return level_sweep(completed_today, rng[0], rng[1], "overnight_range")
         return None
 
     # ------------------------------------------------------------ Retrace entries

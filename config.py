@@ -77,6 +77,7 @@ class Config:
     SWEEP_RR: float = _f("SWEEP_RR", 2.0)                    # reward:risk target
     SWEEP_TREND_FILTER: bool = _b("SWEEP_TREND_FILTER", False)
     SWEEP_PREV_DAY_LEVELS: bool = _b("SWEEP_PREV_DAY_LEVELS", True)
+    SWEEP_OVERNIGHT_RANGE: bool = _b("SWEEP_OVERNIGHT_RANGE", True)
     SWEEP_ENTRY: str = os.getenv("SWEEP_ENTRY", "close").lower()  # "close" | "retrace"
     SWEEP_RETRACE_EXPIRY_MIN: int = _i("SWEEP_RETRACE_EXPIRY_MIN", 60)
     SWEEP_DISASTER_STOP_PCT: float = _f("SWEEP_DISASTER_STOP_PCT", 0.60)

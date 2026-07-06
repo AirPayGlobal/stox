@@ -7,6 +7,8 @@ from analysis.htf import completed_bars, resample_bars
 from analysis.signals import Signal
 from analysis.sweeps import (
     find_fvg,
+    level_sweep,
+    overnight_range,
     prev_day_level_sweep,
     rr_target,
     sweep_reclaim,
@@ -88,6 +90,53 @@ def test_prev_day_low_sweep():
 def test_prev_day_high_break_no_reclaim_is_not_signal():
     df = candles([(104, 106, 103.9, 105.5)], freq="5min")  # breaks and HOLDS above
     assert prev_day_level_sweep(df, prev_day_high=105.0, prev_day_low=99.0) is None
+
+
+# ------------------------------------------------------------ overnight range
+def _ext_session():
+    """Prev-day RTH + post-market + today's pre-market + today's RTH bars."""
+    rows = []
+    # prev day RTH (high 105, low 100) — must NOT count toward the ON range
+    rows += [("2026-07-02 10:00", 102, 105, 100, 103)]
+    rows += [("2026-07-02 15:55", 103, 104, 102, 103)]
+    # overnight/post + pre-market (high 104.5, low 98.5) — the ON range
+    rows += [("2026-07-02 18:00", 103, 104.5, 102.5, 103.5)]
+    rows += [("2026-07-06 07:00", 103, 103.5, 98.5, 99.0)]
+    # today's RTH — must NOT count
+    rows += [("2026-07-06 10:00", 99, 110, 97, 108)]
+    idx = pd.DatetimeIndex([pd.Timestamp(t, tz=ET) for t, *_ in rows])
+    return pd.DataFrame(
+        [{"open": o, "high": h, "low": l, "close": c, "volume": 100} for _, o, h, l, c in rows],
+        index=idx,
+    )
+
+
+def test_overnight_range_uses_only_extended_window():
+    rng = overnight_range(_ext_session(), pd.Timestamp("2026-07-06").date())
+    assert rng == (104.5, 98.5)
+
+
+def test_overnight_range_premarket_only_fallback():
+    df = _ext_session()
+    today_pre = df[df.index >= pd.Timestamp("2026-07-06 07:00", tz=ET)]
+    rng = overnight_range(today_pre.iloc[:1], pd.Timestamp("2026-07-06").date())
+    assert rng == (103.5, 98.5)
+
+
+def test_overnight_range_empty_when_no_prior_bars():
+    df = _ext_session()
+    rth_only_today = df[df.index >= pd.Timestamp("2026-07-06 10:00", tz=ET)]
+    assert overnight_range(rth_only_today, pd.Timestamp("2026-07-06").date()) is None
+
+
+def test_overnight_low_sweep_reclaim_is_long():
+    # 5-min bar dips below the ON low 98.5 and closes back above, bullish
+    df = candles([(99.0, 99.4, 98.2, 99.3)], freq="5min")
+    sig = level_sweep(df, level_high=104.5, level_low=98.5, kind="overnight_range")
+    assert sig is not None
+    assert sig.direction == Signal.LONG
+    assert sig.kind == "overnight_range"
+    assert sig.extreme == 98.2
 
 
 # ------------------------------------------------------------ FVG
