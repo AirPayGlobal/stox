@@ -36,7 +36,31 @@ _lock = threading.Lock()
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
-APP_VERSION = "2.1.0"
+APP_VERSION = "2.2.0"
+
+
+def _start_engine(dry_run: bool = False) -> tuple[bool, str]:
+    global _engine, _thread
+    with _lock:
+        if _thread and _thread.is_alive() and _engine and _engine.running:
+            return False, "engine already running"
+        _engine = TradingEngine(dry_run=dry_run)
+        _thread = threading.Thread(target=_engine.run, daemon=True)
+        _thread.start()
+    return True, "started"
+
+
+@app.on_event("startup")
+def _autostart() -> None:
+    """Default state is RUNNING: start the engine when the server boots."""
+    if not Config.ENGINE_AUTOSTART:
+        logger.info("ENGINE_AUTOSTART=false — waiting for manual start")
+        return
+    if not Config.ALPACA_API_KEY or not Config.ALPACA_API_SECRET:
+        logger.warning("Autostart skipped: Alpaca API keys not configured")
+        return
+    ok, msg = _start_engine(dry_run=Config.ENGINE_AUTOSTART_DRY)
+    logger.info(f"Engine autostart: {msg} (dry_run={Config.ENGINE_AUTOSTART_DRY})")
 
 
 def _unauthorized() -> HTTPException:
@@ -85,47 +109,6 @@ def healthz():
     return {"ok": True, "app": "stox-options", "version": APP_VERSION}
 
 
-@app.get("/authz-debug")
-def authz_debug():
-    """
-    TEMPORARY credential-configuration diagnostic. Reveals whether the
-    running container actually received custom DASHBOARD_USER/PASS values,
-    WITHOUT exposing the password itself (only its length). Remove once the
-    login issue is resolved.
-    """
-    user = Config.DASHBOARD_USER.strip()
-    pw = Config.DASHBOARD_PASS.strip()
-    return {
-        "configured_user": user,
-        "user_is_default": user == "admin",
-        "password_length": len(pw),
-        "password_is_default": pw == "changeme",
-        "password_ascii_only": pw.isascii(),
-        "raw_password_had_surrounding_whitespace": pw != Config.DASHBOARD_PASS,
-        "env_var_DASHBOARD_USER_present": "DASHBOARD_USER" in os.environ,
-        "env_var_DASHBOARD_PASS_present": "DASHBOARD_PASS" in os.environ,
-    }
-
-
-@app.get("/authz-debug/check")
-def authz_debug_check(u: str = "", p: str = ""):
-    """
-    TEMPORARY: compare attempted credentials against the configured ones and
-    say WHICH field mismatches, without revealing the stored values.
-    Usage: /authz-debug/check?u=myuser&p=mypass
-    """
-    exp_user = Config.DASHBOARD_USER.strip()
-    exp_pw = Config.DASHBOARD_PASS.strip()
-    return {
-        "username_matches": secrets.compare_digest(u.encode(), exp_user.encode()),
-        "password_matches": secrets.compare_digest(p.encode(), exp_pw.encode()),
-        "you_typed_user_length": len(u),
-        "expected_user_length": len(exp_user),
-        "you_typed_password_length": len(p),
-        "expected_password_length": len(exp_pw),
-    }
-
-
 @app.get("/")
 def index(_: str = Depends(_auth)):
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
@@ -147,15 +130,10 @@ def api_trades(_: str = Depends(_auth)):
 
 @app.post("/api/start")
 def api_start(dry_run: bool = False, _: str = Depends(_auth)):
-    global _engine, _thread
-    with _lock:
-        if _thread and _thread.is_alive():
-            return {"ok": False, "message": "engine already running"}
-        _engine = TradingEngine(dry_run=dry_run)
-        _thread = threading.Thread(target=_engine.run, daemon=True)
-        _thread.start()
-    logger.info(f"Engine started via API (dry_run={dry_run})")
-    return {"ok": True, "dry_run": dry_run}
+    ok, message = _start_engine(dry_run=dry_run)
+    if ok:
+        logger.info(f"Engine started via API (dry_run={dry_run})")
+    return {"ok": ok, "message": message, "dry_run": dry_run}
 
 
 @app.post("/api/stop")

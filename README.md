@@ -124,12 +124,17 @@ account):
 python main.py
 ```
 
-**Dashboard** (start/stop the engine, watch P&L vs target live):
+**Dashboard** (watch P&L vs target live, stop/restart the engine):
 
 ```bash
 uvicorn api.server:app --host 0.0.0.0 --port 8000
 # open http://localhost:8000  (basic auth: DASHBOARD_USER / DASHBOARD_PASS)
 ```
+
+The engine **starts automatically when the server boots** (default state is
+running). Set `ENGINE_AUTOSTART=false` to require pressing ▶ Start instead,
+or `ENGINE_AUTOSTART_DRY=true` to auto-start in signals-only dry-run mode.
+Day P&L baseline, trade counts, and governor locks persist across restarts.
 
 **Tests**:
 
