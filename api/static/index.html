@@ -67,6 +67,32 @@
   <th>Contract</th><th>Dir</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Reason</th><th>P&amp;L</th>
 </tr></thead><tbody></tbody></table>
 
+<h2>Backtest</h2>
+<div class="bar-wrap" id="bt-form">
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <select id="bt-strategy">
+      <option value="all">all (orb + sweep + swing)</option>
+      <option value="both">both (orb + sweep)</option>
+      <option value="orb">orb</option>
+      <option value="sweep">sweep</option>
+      <option value="swing">swing (multi-day 4H)</option>
+    </select>
+    <input id="bt-days" type="number" value="60" min="5" max="365" title="days"> days
+    <input id="bt-equity" type="number" value="100000" step="10000" title="equity"> equity
+    <input id="bt-symbols" type="text" placeholder="SPY,QQQ (default)" size="12">
+    <button class="dry" id="bt-run" onclick="runBacktest()">Run backtest</button>
+    <span id="bt-status" style="color:#8b949e"></span>
+  </div>
+  <div id="bt-results" style="margin-top:12px"></div>
+</div>
+<style>
+  select, input[type=number], input[type=text] {
+    background:#0d1117; color:#e6edf3; border:1px solid #30363d;
+    border-radius:6px; padding:6px 8px;
+  }
+  input[type=number] { width:90px; }
+</style>
+
 <script>
 const fmt = (n, d=2) => n == null ? "—" :
   Number(n).toLocaleString("en-US", {minimumFractionDigits:d, maximumFractionDigits:d});
@@ -132,6 +158,47 @@ async function refresh() {
       <td>$${fmt(t.entry_premium)}</td><td>$${fmt(t.exit_premium)}</td><td>${t.status}</td>
       <td class="${t.pnl >= 0 ? "pos" : "neg"}">${money(t.pnl)}</td></tr>`).join("")
     || `<tr><td colspan="7" style="color:#8b949e">none yet</td></tr>`;
+}
+
+async function runBacktest() {
+  const btn = document.getElementById("bt-run"), st = document.getElementById("bt-status");
+  const params = new URLSearchParams({
+    strategy: document.getElementById("bt-strategy").value,
+    days: document.getElementById("bt-days").value,
+    equity: document.getElementById("bt-equity").value,
+    symbols: document.getElementById("bt-symbols").value,
+  });
+  btn.disabled = true;
+  st.textContent = "running… (can take ~30s)";
+  document.getElementById("bt-results").innerHTML = "";
+  try {
+    const res = await (await fetch("/api/backtest?" + params, {method: "POST"})).json();
+    if (res.error) { st.textContent = "error: " + res.error; return; }
+    st.textContent = `${res.symbols.join(", ")} · ${res.days_requested} days · $${fmt(res.equity,0)}`;
+    let html = "";
+    for (const [name, s] of Object.entries(res.strategies)) {
+      if (!s.trades) { html += `<h2>${name}: no trades</h2>`; continue; }
+      html += `<h2>${name}</h2><table><thead><tr>
+        <th>Trades</th><th>Win rate</th><th>Total P&L</th><th>Avg day</th>
+        <th>Best / worst day</th><th>Days ≥ target</th>${s.avg_hold_days !== undefined ? "<th>Avg hold</th>" : ""}
+        <th>Exits</th></tr></thead><tbody><tr>
+        <td>${s.trades}</td>
+        <td>${fmt(s.win_rate * 100, 0)}%</td>
+        <td class="${s.total_pnl >= 0 ? "pos" : "neg"}">${money(s.total_pnl)}</td>
+        <td class="${s.avg_daily_pnl >= 0 ? "pos" : "neg"}">${money(s.avg_daily_pnl)}</td>
+        <td>${money(s.best_day)} / ${money(s.worst_day)}</td>
+        <td>${s.days_at_target} of ${s.trading_days}</td>
+        ${s.avg_hold_days !== undefined ? `<td>${s.avg_hold_days}d</td>` : ""}
+        <td>${Object.entries(s.exit_reasons).map(([k,v]) => k + ":" + v).join(" · ")}</td>
+      </tr></tbody></table>`;
+    }
+    html += `<div style="color:#8b949e; font-size:12px">⚠ ${res.caveat}</div>`;
+    document.getElementById("bt-results").innerHTML = html;
+  } catch (e) {
+    st.textContent = "request failed: " + e;
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 refresh();

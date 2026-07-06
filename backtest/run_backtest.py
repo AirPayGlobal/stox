@@ -263,65 +263,104 @@ def simulate_day_sweep(
     return trades
 
 
-def run(symbols: list[str], days: int, equity: float, strategy: str) -> None:
-    strategies = ["orb", "sweep"] if strategy == "both" else [strategy]
-    all_trades: list[dict] = []
+def _resolve_strategies(strategy: str) -> list[str]:
+    if strategy == "both":
+        return ["orb", "sweep"]
+    if strategy == "all":
+        return ["orb", "sweep", "swing"]
+    return [strategy]
+
+
+def _stats(trades: list[dict]) -> dict:
+    """JSON-safe summary of one strategy's simulated trades."""
+    df = pd.DataFrame(trades)
+    daily = df.groupby("date")["pnl"].sum()
+    wins = df[df["pnl"] > 0]
+    target = Config.DAILY_PROFIT_TARGET
+    out = {
+        "trades": len(df),
+        "trading_days": int(daily.shape[0]),
+        "win_rate": round(len(wins) / len(df), 3),
+        "total_pnl": round(float(df["pnl"].sum()), 0),
+        "avg_daily_pnl": round(float(daily.mean()), 0),
+        "median_daily_pnl": round(float(daily.median()), 0),
+        "best_day": round(float(daily.max()), 0),
+        "worst_day": round(float(daily.min()), 0),
+        "daily_stdev": round(float(daily.std()), 0) if daily.shape[0] > 1 else 0.0,
+        "days_at_target": int((daily >= target).sum()),
+        "exit_reasons": {str(k): int(v) for k, v in df["exit_reason"].value_counts().items()},
+    }
+    if "hold_days" in df.columns:
+        out["avg_hold_days"] = round(float(df["hold_days"].mean()), 1)
+    return out
+
+
+def run_backtest(symbols: list[str], days: int, equity: float, strategy: str) -> dict:
+    """Run the simulation and return a JSON-safe results dict."""
+    from backtest.swing import simulate_swing
+
+    strategies = _resolve_strategies(strategy)
+    by_strategy: dict[str, list[dict]] = {s: [] for s in strategies}
 
     for symbol in symbols:
-        print(f"Fetching {days} days of {Config.BAR_MINUTES}-min bars for {symbol}…")
-        bars_ext = get_intraday_bars(symbol, lookback_days=days, rth_only=False)
-        if bars_ext.empty:
-            print(f"  no data for {symbol} — skipping")
-            continue
-        bars = bars_ext.between_time("09:30", "16:00")
-        day_groups = [(d, g) for d, g in bars.groupby(bars.index.date)]
-        for idx, (day, day_bars) in enumerate(day_groups):
-            prev_bars = day_groups[idx - 1][1] if idx > 0 else None
-            if "orb" in strategies:
-                for t in simulate_day_orb(symbol, day_bars, equity):
-                    t["strategy"] = "orb"
-                    all_trades.append(t)
-            if "sweep" in strategies:
-                onr = _range_levels(bars_ext, day)
-                for t in simulate_day_sweep(symbol, prev_bars, day_bars, equity, onr=onr):
-                    t["strategy"] = "sweep"
-                    all_trades.append(t)
+        if "orb" in strategies or "sweep" in strategies:
+            bars_ext = get_intraday_bars(symbol, lookback_days=days, rth_only=False)
+            if not bars_ext.empty:
+                bars = bars_ext.between_time("09:30", "16:00")
+                day_groups = [(d, g) for d, g in bars.groupby(bars.index.date)]
+                for idx, (day, day_bars) in enumerate(day_groups):
+                    prev_bars = day_groups[idx - 1][1] if idx > 0 else None
+                    if "orb" in strategies:
+                        by_strategy["orb"] += simulate_day_orb(symbol, day_bars, equity)
+                    if "sweep" in strategies:
+                        onr = _range_levels(bars_ext, day)
+                        by_strategy["sweep"] += simulate_day_sweep(
+                            symbol, prev_bars, day_bars, equity, onr=onr
+                        )
+        if "swing" in strategies:
+            swing_bars = get_intraday_bars(
+                symbol, minutes=Config.SWING_BAR_MINUTES, lookback_days=days
+            )
+            if not swing_bars.empty:
+                by_strategy["swing"] += simulate_swing(symbol, swing_bars, equity)
 
-    if not all_trades:
-        print("No trades generated.")
-        return
+    return {
+        "symbols": symbols,
+        "days_requested": days,
+        "equity": equity,
+        "daily_profit_target": Config.DAILY_PROFIT_TARGET,
+        "strategies": {
+            s: (_stats(trades) if trades else {"trades": 0})
+            for s, trades in by_strategy.items()
+        },
+        "caveat": (
+            "Simulated fills (Black-Scholes marks, realized-IV proxy, assumed "
+            "half-spread). Real fills include slippage and IV shifts this model "
+            "only approximates — treat as an upper bound."
+        ),
+    }
 
-    df = pd.DataFrame(all_trades)
+
+def print_results(res: dict) -> None:
     print("\n========== BACKTEST RESULTS (simulated option marks) ==========")
-    print(f"Symbols          : {', '.join(symbols)}")
-    print(f"Account equity   : ${equity:,.0f}")
-    for strat in strategies:
-        sub = df[df["strategy"] == strat]
-        if sub.empty:
+    print(f"Symbols          : {', '.join(res['symbols'])}")
+    print(f"Account equity   : ${res['equity']:,.0f}")
+    for strat, s in res["strategies"].items():
+        if not s.get("trades"):
             print(f"\n--- {strat.upper()}: no trades ---")
             continue
-        daily = sub.groupby("date")["pnl"].sum()
-        wins = sub[sub["pnl"] > 0]
-        target = Config.DAILY_PROFIT_TARGET
         print(f"\n--- {strat.upper()} ---")
-        print(f"Trading days     : {daily.shape[0]}")
-        print(f"Trades           : {len(sub)}  (avg {len(sub)/daily.shape[0]:.1f}/day)")
-        print(f"Win rate         : {len(wins)/len(sub):.0%}")
-        print(f"Total P&L        : ${sub['pnl'].sum():+,.0f}")
-        print(f"Avg daily P&L    : ${daily.mean():+,.0f}   (median ${daily.median():+,.0f})")
-        print(f"Best / worst day : ${daily.max():+,.0f} / ${daily.min():+,.0f}")
-        print(f"Daily P&L stdev  : ${daily.std():,.0f}")
-        print(
-            f"Days >= +${target:,.0f} : {(daily >= target).sum()} of {daily.shape[0]} "
-            f"({(daily >= target).mean():.0%})"
-        )
-        print("Exit reasons     : " + ", ".join(
-            f"{r}={n}" for r, n in sub["exit_reason"].value_counts().items()
-        ))
-    print(
-        "\n⚠ Simulated fills (Black-Scholes, fixed IV proxy, "
-        f"${SPREAD_COST:.02f} half-spread). Paper trade before trusting this."
-    )
+        print(f"Trading days     : {s['trading_days']}")
+        print(f"Trades           : {s['trades']}")
+        print(f"Win rate         : {s['win_rate']:.0%}")
+        print(f"Total P&L        : ${s['total_pnl']:+,.0f}")
+        print(f"Avg daily P&L    : ${s['avg_daily_pnl']:+,.0f} (median ${s['median_daily_pnl']:+,.0f})")
+        print(f"Best / worst day : ${s['best_day']:+,.0f} / ${s['worst_day']:+,.0f}")
+        print(f"Days >= target   : {s['days_at_target']} of {s['trading_days']}")
+        if "avg_hold_days" in s:
+            print(f"Avg hold         : {s['avg_hold_days']} days")
+        print("Exit reasons     : " + ", ".join(f"{k}={v}" for k, v in s["exit_reasons"].items()))
+    print(f"\n⚠ {res['caveat']}")
 
 
 def main() -> None:
@@ -330,11 +369,13 @@ def main() -> None:
     parser.add_argument("--days", type=int, default=30)
     parser.add_argument("--equity", type=float, default=100_000)
     parser.add_argument(
-        "--strategy", choices=["orb", "sweep", "both"], default=Config.STRATEGY
+        "--strategy",
+        choices=["orb", "sweep", "swing", "both", "all"],
+        default=Config.STRATEGY,
     )
     args = parser.parse_args()
     symbols = [s.upper() for s in args.symbols] or Config.UNDERLYINGS
-    run(symbols, args.days, args.equity, args.strategy)
+    print_results(run_backtest(symbols, args.days, args.equity, args.strategy))
 
 
 if __name__ == "__main__":
