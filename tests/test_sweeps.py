@@ -11,6 +11,7 @@ from analysis.sweeps import (
     overnight_range,
     prev_day_level_sweep,
     rr_target,
+    session_range,
     sweep_reclaim,
 )
 
@@ -127,6 +128,36 @@ def test_overnight_range_empty_when_no_prior_bars():
     df = _ext_session()
     rth_only_today = df[df.index >= pd.Timestamp("2026-07-06 10:00", tz=ET)]
     assert overnight_range(rth_only_today, pd.Timestamp("2026-07-06").date()) is None
+
+
+def test_session_range_premarket_window():
+    # 04:00-09:30 window must exclude the prev-day 18:00 bar (high 104.5)
+    rng = session_range(_ext_session(), pd.Timestamp("2026-07-06").date(), "04:00-09:30")
+    assert rng == (103.5, 98.5)
+
+
+def test_session_range_spanning_midnight():
+    # 18:00-08:00 spans midnight: includes the PRIOR CALENDAR DAY's evening
+    # bar and today's pre-market bar.
+    idx = pd.DatetimeIndex([
+        pd.Timestamp("2026-07-05 18:30", tz=ET),   # prior evening, high 104.5
+        pd.Timestamp("2026-07-06 07:00", tz=ET),   # pre-market, low 98.5
+        pd.Timestamp("2026-07-06 10:00", tz=ET),   # RTH — must be excluded
+    ])
+    df = pd.DataFrame(
+        {"open": [103, 103, 99], "high": [104.5, 103.5, 110],
+         "low": [102.5, 98.5, 97], "close": [103.5, 99, 108], "volume": 100},
+        index=idx,
+    )
+    rng = session_range(df, pd.Timestamp("2026-07-06").date(), "18:00-08:00")
+    assert rng == (104.5, 98.5)
+
+
+def test_session_range_empty_window_and_bad_format():
+    df = _ext_session()
+    day = pd.Timestamp("2026-07-06").date()
+    assert session_range(df, day, "01:00-02:00") is None   # no bars in window
+    assert session_range(df, day, "garbage") is None       # malformed
 
 
 def test_overnight_low_sweep_reclaim_is_long():

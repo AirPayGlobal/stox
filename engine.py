@@ -34,6 +34,7 @@ from analysis.sweeps import (
     overnight_range,
     prev_day_level_sweep,
     rr_target,
+    session_range,
     sweep_reclaim,
 )
 from config import Config
@@ -363,9 +364,14 @@ class TradingEngine:
                 if sig:
                     return sig
         if Config.SWEEP_OVERNIGHT_RANGE and bars_ext is not None:
-            rng = overnight_range(bars_ext, now.date())
+            if Config.SWEEP_SESSION_WINDOW:
+                rng = session_range(bars_ext, now.date(), Config.SWEEP_SESSION_WINDOW)
+                kind = "session_range"
+            else:
+                rng = overnight_range(bars_ext, now.date())
+                kind = "overnight_range"
             if rng:
-                return level_sweep(completed_today, rng[0], rng[1], "overnight_range")
+                return level_sweep(completed_today, rng[0], rng[1], kind)
         return None
 
     # ------------------------------------------------------------ Retrace entries

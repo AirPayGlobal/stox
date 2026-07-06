@@ -151,6 +151,37 @@ def find_fvg(df: pd.DataFrame, direction: Signal, lookback: int = 20) -> tuple[f
     return None
 
 
+def session_range(
+    ext_df: pd.DataFrame, session_date, window: str
+) -> tuple[float, float] | None:
+    """
+    (high, low) of bars within an ET time window preceding `session_date`'s
+    RTH open. `window` is "HH:MM-HH:MM"; a start later than the end spans
+    midnight (start on the prior calendar day). Returns None when the window
+    holds no bars (e.g. hours our data feed doesn't cover).
+    """
+    try:
+        start_s, end_s = window.split("-")
+        sh, sm = map(int, start_s.split(":"))
+        eh, em = map(int, end_s.split(":"))
+    except ValueError:
+        return None
+    if ext_df.empty:
+        return None
+
+    tz = ext_df.index.tz
+    day = pd.Timestamp(session_date).tz_localize(tz)
+    end_ts = day + pd.Timedelta(hours=eh, minutes=em)
+    start_ts = day + pd.Timedelta(hours=sh, minutes=sm)
+    if start_ts >= end_ts:
+        start_ts -= pd.Timedelta(days=1)
+
+    seg = ext_df[(ext_df.index >= start_ts) & (ext_df.index < end_ts)]
+    if seg.empty:
+        return None
+    return float(seg["high"].max()), float(seg["low"].min())
+
+
 def rr_target(entry: float, stop: float, rr: float) -> float:
     """Target price at `rr` times the stop distance (sign-aware)."""
     return entry + rr * (entry - stop)
