@@ -2,23 +2,40 @@
 STOX Options — intraday trading engine.
 
 Loop (every Config.LOOP_SECONDS while the market is open):
-  1. mark open positions and fire exits (target / stop / time stop /
-     signal reversal / end-of-day flatten / loss-halt flatten)
+  1. mark open positions and fire exits — premium target/stop (ORB trades),
+     underlying-level target/stop (sweep trades), time stop, signal
+     reversal, end-of-day flatten, loss-halt flatten
   2. re-evaluate the daily governor (profit target lock, max-loss halt)
-  3. every Config.SCAN_SECONDS, scan the underlyings for entries:
-     signal -> contract selection -> risk sizing -> market order
+  3. check pending retracement setups (sweep strategy, SWEEP_ENTRY=retrace)
+  4. every Config.SCAN_SECONDS, scan the underlyings for entries
+
+Two strategies (Config.STRATEGY: "orb" | "sweep" | "both"):
+  * orb   — opening-range-breakout momentum confluence (analysis/signals.py);
+            exits on premium (+TAKE_PROFIT_PCT / -STOP_LOSS_PCT) and time
+  * sweep — liquidity-sweep reversal (analysis/sweeps.py): higher-timeframe
+            sweep-and-reclaim candles and previous-day high/low sweeps;
+            stop beyond the sweep wick, target at SWEEP_RR times the risk,
+            both defined on the UNDERLYING price
 
 Day trading only: every position is closed by Config.FLATTEN_TIME ET.
 """
 from __future__ import annotations
 
 import time
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
+from analysis.htf import completed_bars, resample_bars
 from analysis.signals import Signal, generate_signal
+from analysis.sweeps import (
+    SweepSignal,
+    find_fvg,
+    prev_day_level_sweep,
+    rr_target,
+    sweep_reclaim,
+)
 from config import Config
-from data.market_data import get_today_bars
+from data.market_data import get_intraday_bars, get_latest_price, get_today_bars
 from data.options_data import get_option_mid
 from options.contracts import select_contract
 from trading.broker import (
@@ -50,8 +67,14 @@ class TradingEngine:
         self.last_scan = 0.0
         self.last_signals: dict[str, dict] = {}
         self.last_equity: float = 0.0
+        # sweep bookkeeping
+        self._acted_sweeps: set[str] = set()          # candle dedupe keys
+        self.pending: dict[str, dict] = {}            # underlying -> retrace setup
         mode = "DRY RUN" if dry_run else Config.ALPACA_MODE.upper()
-        logger.info(f"Engine ready | mode={mode} | underlyings={','.join(Config.UNDERLYINGS)}")
+        logger.info(
+            f"Engine ready | mode={mode} | strategy={Config.STRATEGY} | "
+            f"underlyings={','.join(Config.UNDERLYINGS)}"
+        )
 
     # ================================================================= Loop
     def run(self) -> None:
@@ -82,13 +105,18 @@ class TradingEngine:
         self.risk.update_governor(equity)
 
         if in_flatten_window:
+            self.pending.clear()
             return
+
+        self.check_pending(equity)
+
         if time.time() - self.last_scan >= Config.SCAN_SECONDS:
             self.last_scan = time.time()
             self.scan_for_entries(account)
 
     # ================================================================= Exits
     def manage_positions(self, flatten_all: bool = False) -> None:
+        ul_prices: dict[str, float | None] = {}
         for trade in list(self.book.open_trades):
             mark = get_option_mid(trade.symbol)
             if mark is None:
@@ -97,20 +125,46 @@ class TradingEngine:
             reason = None
             if flatten_all:
                 reason = "HALT" if self.risk.must_flatten() else "FLATTEN"
-            elif mark >= trade.target_premium:
-                reason = "TP"
-            elif mark <= trade.stop_premium:
-                reason = "SL"
-            elif trade.minutes_open() >= Config.MAX_HOLD_MINUTES:
-                reason = "TIME"
-            elif self._signal_reversed(trade):
-                reason = "SIGNAL"
+            elif trade.stop_underlying or trade.target_underlying:
+                if trade.underlying not in ul_prices:
+                    ul_prices[trade.underlying] = get_latest_price(trade.underlying)
+                reason = self._underlying_exit(trade, ul_prices[trade.underlying], mark)
+            else:
+                reason = self._premium_exit(trade, mark)
 
             if reason:
                 self._close(trade.symbol, mark, reason)
 
+    def _premium_exit(self, trade, mark: float) -> str | None:
+        if mark >= trade.target_premium:
+            return "TP"
+        if mark <= trade.stop_premium:
+            return "SL"
+        if trade.minutes_open() >= Config.MAX_HOLD_MINUTES:
+            return "TIME"
+        if self._signal_reversed(trade):
+            return "SIGNAL"
+        return None
+
+    def _underlying_exit(self, trade, price: float | None, mark: float) -> str | None:
+        if price is not None:
+            if trade.direction == "LONG":
+                if trade.stop_underlying and price <= trade.stop_underlying:
+                    return "UL_SL"
+                if trade.target_underlying and price >= trade.target_underlying:
+                    return "UL_TP"
+            else:
+                if trade.stop_underlying and price >= trade.stop_underlying:
+                    return "UL_SL"
+                if trade.target_underlying and price <= trade.target_underlying:
+                    return "UL_TP"
+        # Disaster backstop on premium (fills/gaps the level check can miss).
+        if mark <= trade.stop_premium:
+            return "SL"
+        return None
+
     def _signal_reversed(self, trade) -> bool:
-        cached = self.last_signals.get(trade.underlying)
+        cached = self.last_signals.get(f"{trade.underlying}·orb")
         if not cached:
             return False
         sig = cached.get("signal")
@@ -140,53 +194,208 @@ class TradingEngine:
                 logger.info(f"Not scanning further: {why}")
                 return
 
-            bars = get_today_bars(underlying)
-            result = generate_signal(bars)
-            self.last_signals[underlying] = {
-                "signal": result.signal.value,
-                "score": result.score,
-                "long_score": result.long_score,
-                "short_score": result.short_score,
-                **result.details,
-                "at": datetime.now(ET).isoformat(timespec="seconds"),
-            }
-            if result.signal == Signal.FLAT:
+            if Config.STRATEGY in ("orb", "both"):
+                self._scan_orb(underlying, equity)
+            if Config.STRATEGY in ("sweep", "both"):
+                self._scan_sweep(underlying, equity)
+
+    # ------------------------------------------------------------ ORB momentum
+    def _scan_orb(self, underlying: str, equity: float) -> None:
+        bars = get_today_bars(underlying)
+        result = generate_signal(bars)
+        self.last_signals[f"{underlying}·orb"] = {
+            "signal": result.signal.value,
+            "score": result.score,
+            **result.details,
+            "at": datetime.now(ET).isoformat(timespec="seconds"),
+        }
+        if result.signal == Signal.FLAT or self.book.open_for(underlying):
+            return
+        self._enter(
+            underlying,
+            result.signal,
+            spot=result.price,
+            strategy="orb",
+            note=f"score={result.score}",
+        )
+
+    # ------------------------------------------------------------ Sweep reversal
+    def _scan_sweep(self, underlying: str, equity: float) -> None:
+        bars = get_intraday_bars(underlying, lookback_days=4)
+        if bars.empty:
+            return
+        today = datetime.now(ET).date()
+        today_bars = bars[bars.index.date == today]
+        if today_bars.empty:
+            return
+        spot = float(today_bars["close"].iloc[-1])
+
+        sig = self._detect_sweep(bars, today_bars)
+        cache_key = f"{underlying}·sweep"
+        if sig is None:
+            self.last_signals.setdefault(cache_key, {"signal": "FLAT"})
+            self.last_signals[cache_key]["at"] = datetime.now(ET).isoformat(timespec="seconds")
+            return
+
+        dedupe = f"{underlying}|{sig.kind}|{sig.candle_ts}"
+        self.last_signals[cache_key] = {
+            "signal": sig.direction.value,
+            "score": 100,
+            "kind": sig.kind,
+            "price": round(spot, 2),
+            "swept": round(sig.swept_level, 2),
+            "stop": round(sig.extreme, 2),
+            "at": datetime.now(ET).isoformat(timespec="seconds"),
+        }
+        if dedupe in self._acted_sweeps:
+            return
+        if self.book.open_for(underlying) or underlying in self.pending:
+            return
+        self._acted_sweeps.add(dedupe)
+
+        if Config.SWEEP_ENTRY == "retrace":
+            self._queue_retrace(underlying, sig, today_bars)
+        else:
+            stop = sig.extreme
+            target = rr_target(spot, stop, Config.SWEEP_RR)
+            self._enter(
+                underlying, sig.direction, spot=spot, strategy="sweep",
+                stop_underlying=stop, target_underlying=target,
+                note=f"{sig.kind} swept={sig.swept_level:.2f}",
+            )
+
+    def _detect_sweep(self, bars, today_bars) -> SweepSignal | None:
+        now = datetime.now(ET)
+        htf = resample_bars(bars, Config.SWEEP_TIMEFRAME_MINUTES)
+        htf = completed_bars(htf, Config.SWEEP_TIMEFRAME_MINUTES, now)
+        sig = sweep_reclaim(htf.tail(2), trend_filter=Config.SWEEP_TREND_FILTER)
+        if sig:
+            return sig
+        if Config.SWEEP_PREV_DAY_LEVELS:
+            prev_days = bars[bars.index.date < now.date()]
+            if not prev_days.empty:
+                last_day = prev_days[prev_days.index.date == prev_days.index.date[-1]]
+                completed_today = completed_bars(today_bars, Config.BAR_MINUTES, now)
+                return prev_day_level_sweep(
+                    completed_today,
+                    prev_day_high=float(last_day["high"].max()),
+                    prev_day_low=float(last_day["low"].min()),
+                )
+        return None
+
+    # ------------------------------------------------------------ Retrace entries
+    def _queue_retrace(self, underlying: str, sig: SweepSignal, today_bars) -> None:
+        """
+        Instead of entering at the reclaim close, wait for price to pull back
+        into the manipulation candle — the FVG of the reclaim leg if one
+        exists, else the candle midpoint — with the same stop (better RR).
+        """
+        fvg = find_fvg(today_bars, sig.direction)
+        if sig.direction == Signal.LONG:
+            trigger = fvg[1] if fvg and sig.candle_low < fvg[1] < sig.close else sig.midpoint
+        else:
+            trigger = fvg[0] if fvg and sig.close < fvg[0] < sig.candle_high else sig.midpoint
+        self.pending[underlying] = {
+            "direction": sig.direction,
+            "trigger": trigger,
+            "stop": sig.extreme,
+            "kind": sig.kind,
+            "expires": datetime.now(ET) + timedelta(minutes=Config.SWEEP_RETRACE_EXPIRY_MIN),
+        }
+        logger.info(
+            f"Retrace setup queued: {underlying} {sig.direction.value} "
+            f"trigger={trigger:.2f} stop={sig.extreme:.2f} ({sig.kind})"
+        )
+
+    def check_pending(self, equity: float) -> None:
+        for underlying, setup in list(self.pending.items()):
+            if datetime.now(ET) >= setup["expires"]:
+                logger.info(f"Retrace setup expired: {underlying}")
+                del self.pending[underlying]
                 continue
-            if self.book.open_for(underlying):
-                continue  # one position per underlying
+            price = get_latest_price(underlying)
+            if price is None:
+                continue
+            direction = setup["direction"]
+            stop = setup["stop"]
+            # Setup invalidated if the stop level is breached before entry.
+            if (direction == Signal.LONG and price <= stop) or (
+                direction == Signal.SHORT and price >= stop
+            ):
+                logger.info(f"Retrace setup invalidated (stop hit first): {underlying}")
+                del self.pending[underlying]
+                continue
+            triggered = (direction == Signal.LONG and price <= setup["trigger"]) or (
+                direction == Signal.SHORT and price >= setup["trigger"]
+            )
+            if not triggered:
+                continue
+            del self.pending[underlying]
+            ok, why = self.risk.can_open(equity, len(self.book.open_trades))
+            if not ok:
+                logger.info(f"Retrace triggered but cannot open: {why}")
+                continue
+            target = rr_target(price, stop, Config.SWEEP_RR)
+            self._enter(
+                underlying, direction, spot=price, strategy="sweep",
+                stop_underlying=stop, target_underlying=target,
+                note=f"retrace {setup['kind']}",
+            )
 
-            self._enter(underlying, result, equity)
-
-    def _enter(self, underlying: str, result, equity: float) -> None:
-        contract = select_contract(underlying, result.signal, result.price)
+    # ------------------------------------------------------------ Order placement
+    def _enter(
+        self,
+        underlying: str,
+        direction: Signal,
+        spot: float,
+        strategy: str,
+        stop_underlying: float = 0.0,
+        target_underlying: float = 0.0,
+        note: str = "",
+    ) -> None:
+        contract = select_contract(underlying, direction, spot)
         if contract is None:
             return
 
         premium = contract.ask  # assume paying the offer on a market order
-        qty = self.risk.contracts_for(equity, premium)
-        if qty < 1:
-            logger.info(
-                f"{underlying}: sized to 0 contracts (premium ${premium:.2f}, "
-                f"equity ${equity:,.0f}) — skipping"
+        equity = self.last_equity
+        if strategy == "sweep":
+            qty = self.risk.contracts_for_underlying_stop(
+                equity, premium, contract.delta, abs(spot - stop_underlying)
             )
+        else:
+            qty = self.risk.contracts_for(equity, premium)
+        if qty < 1:
+            logger.info(f"{underlying}: sized to 0 contracts — skipping ({note})")
             return
 
         logger.info(
-            f"ENTRY {result.signal.value} {underlying} score={result.score} | "
+            f"ENTRY [{strategy}] {direction.value} {underlying} | {note} | "
             f"{qty}x {contract.symbol} @ ~${premium:.2f} "
             f"(delta={contract.delta}, OI={contract.open_interest})"
+            + (
+                f" | UL stop={stop_underlying:.2f} target={target_underlying:.2f}"
+                if stop_underlying
+                else ""
+            )
         )
 
         if self.dry_run:
             logger.info(f"[DRY RUN] Would BUY {qty}x {contract.symbol}")
-            self.book.open(contract.symbol, underlying, result.signal.value, qty, premium)
+            self.book.open(
+                contract.symbol, underlying, direction.value, qty, premium,
+                strategy=strategy, stop_underlying=stop_underlying,
+                target_underlying=target_underlying,
+            )
             self.risk.record_open()
             return
 
         order_id = buy_option(contract.symbol, qty)
         if order_id:
             self.book.open(
-                contract.symbol, underlying, result.signal.value, qty, premium, order_id
+                contract.symbol, underlying, direction.value, qty, premium, order_id,
+                strategy=strategy, stop_underlying=stop_underlying,
+                target_underlying=target_underlying,
             )
             self.risk.record_open()
 
@@ -197,19 +406,32 @@ class TradingEngine:
             "running": self.running,
             "dry_run": self.dry_run,
             "mode": Config.ALPACA_MODE,
+            "strategy": Config.STRATEGY,
             "equity": equity,
             "risk": self.risk.snapshot(equity) if equity else {},
             "book": self.book.summary(),
             "signals": self.last_signals,
+            "pending": {
+                u: {
+                    "direction": p["direction"].value,
+                    "trigger": round(p["trigger"], 2),
+                    "stop": round(p["stop"], 2),
+                    "expires": p["expires"].isoformat(timespec="seconds"),
+                }
+                for u, p in self.pending.items()
+            },
             "open_trades": [
                 {
                     "symbol": t.symbol,
                     "underlying": t.underlying,
+                    "strategy": t.strategy,
                     "direction": t.direction,
                     "qty": t.qty,
                     "entry": t.entry_premium,
                     "stop": t.stop_premium,
                     "target": t.target_premium,
+                    "stop_underlying": t.stop_underlying,
+                    "target_underlying": t.target_underlying,
                     "opened_at": t.opened_at,
                 }
                 for t in self.book.open_trades

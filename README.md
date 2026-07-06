@@ -27,6 +27,20 @@ your capital (a common intraday framing is 0.5–1% of equity per day), and:
 2. Only go live if the paper results, including losing streaks, are acceptable.
 3. Note US **pattern-day-trader rules** require ≥ $25,000 equity to daytrade.
 
+## Strategies
+
+Two independent signal strategies (`STRATEGY=orb|sweep|both`):
+
+1. **ORB momentum** — opening-range breakout with VWAP/EMA/RSI confluence
+   scoring, premium-based exits (+50% / −30% / time stop). Described below.
+2. **Sweep reversal** — liquidity-sweep-and-reclaim ("manipulation candle"):
+   a higher-timeframe candle sweeps the previous candle's low (or the
+   previous day's low) and closes back above it → buy calls; mirror image →
+   buy puts. Stop beyond the sweep wick, target at 2× the risk, both tracked
+   on the **underlying** price. Optional retracement entry into the fair
+   value gap for better RR. Systemized from trader transcripts — see
+   [docs/STRATEGIES.md](docs/STRATEGIES.md) for the full mapping and caveats.
+
 ## How it trades
 
 ```

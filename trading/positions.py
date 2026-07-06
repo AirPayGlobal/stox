@@ -30,10 +30,13 @@ class Trade:
     target_premium: float
     opened_at: str         # ISO, ET
     order_id: str = ""
-    status: str = "OPEN"   # OPEN | TP | SL | TIME | FLATTEN | SIGNAL | HALT
+    status: str = "OPEN"   # OPEN | TP | SL | UL_TP | UL_SL | TIME | FLATTEN | SIGNAL | HALT
     exit_premium: float = 0.0
     closed_at: str = ""
     pnl: float = 0.0
+    strategy: str = "orb"        # "orb" | "sweep"
+    stop_underlying: float = 0.0    # 0 = premium-based exits only
+    target_underlying: float = 0.0
 
     def unrealized(self, mark: float) -> float:
         return (mark - self.entry_premium) * 100 * self.qty
@@ -64,17 +67,31 @@ class PositionBook:
         qty: int,
         entry_premium: float,
         order_id: str = "",
+        strategy: str = "orb",
+        stop_underlying: float = 0.0,
+        target_underlying: float = 0.0,
     ) -> Trade:
+        if strategy == "sweep":
+            # Exits are driven by underlying levels; the premium stop is only
+            # a wide disaster backstop and there is no premium target.
+            stop_premium = round(entry_premium * (1 - Config.SWEEP_DISASTER_STOP_PCT), 2)
+            target_premium = round(entry_premium * 1000, 2)
+        else:
+            stop_premium = round(entry_premium * (1 - Config.STOP_LOSS_PCT), 2)
+            target_premium = round(entry_premium * (1 + Config.TAKE_PROFIT_PCT), 2)
         trade = Trade(
             symbol=symbol,
             underlying=underlying,
             direction=direction,
             qty=qty,
             entry_premium=entry_premium,
-            stop_premium=round(entry_premium * (1 - Config.STOP_LOSS_PCT), 2),
-            target_premium=round(entry_premium * (1 + Config.TAKE_PROFIT_PCT), 2),
+            stop_premium=stop_premium,
+            target_premium=target_premium,
             opened_at=datetime.now(ET).isoformat(),
             order_id=order_id,
+            strategy=strategy,
+            stop_underlying=round(stop_underlying, 2),
+            target_underlying=round(target_underlying, 2),
         )
         self.book.open_trades.append(trade)
         self._save()
