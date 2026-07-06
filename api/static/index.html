@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>STOX Options</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 14px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+         background:#0d1117; color:#e6edf3; padding:24px; max-width:1100px; margin:auto; }
+  h1 { font-size:20px; margin-bottom:4px; }
+  .sub { color:#8b949e; margin-bottom:20px; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:20px; }
+  .card { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:14px; }
+  .card .label { color:#8b949e; font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+  .card .value { font-size:22px; font-weight:600; margin-top:4px; }
+  .pos { color:#3fb950; } .neg { color:#f85149; } .warn { color:#d29922; }
+  .bar-wrap { background:#161b22; border:1px solid #30363d; border-radius:8px; padding:14px; margin-bottom:20px; }
+  .bar { height:14px; background:#21262d; border-radius:7px; overflow:hidden; margin-top:8px; }
+  .bar > div { height:100%; border-radius:7px; background:#3fb950; transition:width .5s; }
+  .bar > div.neg { background:#f85149; }
+  table { width:100%; border-collapse:collapse; background:#161b22; border:1px solid #30363d;
+          border-radius:8px; overflow:hidden; margin-bottom:20px; }
+  th, td { padding:8px 12px; text-align:left; border-bottom:1px solid #21262d; }
+  th { color:#8b949e; font-size:12px; text-transform:uppercase; }
+  .controls { margin-bottom:20px; display:flex; gap:8px; }
+  button { background:#238636; color:#fff; border:0; border-radius:6px; padding:8px 16px;
+           cursor:pointer; font-weight:600; }
+  button.stop { background:#da3633; }
+  button.dry { background:#1f6feb; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600; }
+  .badge.on  { background:#0f2e18; color:#3fb950; }
+  .badge.off { background:#2d1517; color:#f85149; }
+  h2 { font-size:15px; margin:20px 0 8px; color:#8b949e; }
+</style>
+</head>
+<body>
+<h1>STOX — Intraday Options <span id="run-badge" class="badge off">STOPPED</span></h1>
+<div class="sub" id="mode-line">—</div>
+
+<div class="controls">
+  <button onclick="control('start')">▶ Start</button>
+  <button class="dry" onclick="control('start?dry_run=true')">▶ Start (dry run)</button>
+  <button class="stop" onclick="control('stop')">■ Stop</button>
+</div>
+
+<div class="bar-wrap">
+  <div class="label">Day P&amp;L vs target <span id="pnl-text"></span></div>
+  <div class="bar"><div id="pnl-bar" style="width:0%"></div></div>
+</div>
+
+<div class="cards" id="cards"></div>
+
+<h2>Open positions</h2>
+<table id="open-table"><thead><tr>
+  <th>Contract</th><th>Dir</th><th>Qty</th><th>Entry</th><th>Stop</th><th>Target</th><th>Opened</th>
+</tr></thead><tbody></tbody></table>
+
+<h2>Signals</h2>
+<table id="sig-table"><thead><tr>
+  <th>Underlying</th><th>Signal</th><th>Score</th><th>Price</th><th>VWAP</th><th>RSI</th><th>As of</th>
+</tr></thead><tbody></tbody></table>
+
+<h2>Closed today</h2>
+<table id="closed-table"><thead><tr>
+  <th>Contract</th><th>Dir</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Reason</th><th>P&amp;L</th>
+</tr></thead><tbody></tbody></table>
+
+<script>
+const fmt = (n, d=2) => n == null ? "—" :
+  Number(n).toLocaleString("en-US", {minimumFractionDigits:d, maximumFractionDigits:d});
+const money = n => (n >= 0 ? "+$" : "-$") + fmt(Math.abs(n), 0);
+
+async function control(action) {
+  await fetch("/api/" + action, {method:"POST"});
+  setTimeout(refresh, 500);
+}
+
+function card(label, value, cls="") {
+  return `<div class="card"><div class="label">${label}</div>
+          <div class="value ${cls}">${value}</div></div>`;
+}
+
+async function refresh() {
+  let s;
+  try { s = await (await fetch("/api/status")).json(); } catch { return; }
+
+  const badge = document.getElementById("run-badge");
+  badge.textContent = s.running ? (s.dry_run ? "DRY RUN" : "RUNNING") : "STOPPED";
+  badge.className = "badge " + (s.running ? "on" : "off");
+  document.getElementById("mode-line").textContent =
+    `mode: ${s.mode || "—"} · equity: $${fmt(s.equity, 0)}`;
+
+  const r = s.risk || {}, b = s.book || {};
+  const pnl = r.day_pnl ?? 0, target = r.profit_target ?? 1;
+  const pct = Math.min(Math.abs(pnl) / target * 100, 100);
+  const bar = document.getElementById("pnl-bar");
+  bar.style.width = pct + "%";
+  bar.className = pnl < 0 ? "neg" : "";
+  document.getElementById("pnl-text").textContent =
+    ` — ${money(pnl)} of +$${fmt(target,0)}` +
+    (r.target_locked ? " · 🎯 TARGET LOCKED" : "") +
+    (r.loss_halted ? " · 🛑 HALTED" : "");
+
+  document.getElementById("cards").innerHTML =
+    card("Day P&L", money(pnl), pnl >= 0 ? "pos" : "neg") +
+    card("Realized today", money(b.realized_today ?? 0), (b.realized_today ?? 0) >= 0 ? "pos" : "neg") +
+    card("Open positions", b.open_positions ?? 0) +
+    card("Trades today", `${b.closed_today ?? 0} (${r.trades_opened ?? 0} opened)`) +
+    card("Win rate today", b.closed_today ? fmt((b.win_rate_today ?? 0) * 100, 0) + "%" : "—");
+
+  document.querySelector("#open-table tbody").innerHTML =
+    (s.open_trades || []).map(t => `<tr>
+      <td>${t.symbol}</td><td>${t.direction}</td><td>${t.qty}</td>
+      <td>$${fmt(t.entry)}</td><td>$${fmt(t.stop)}</td><td>$${fmt(t.target)}</td>
+      <td>${(t.opened_at || "").slice(11,19)}</td></tr>`).join("")
+    || `<tr><td colspan="7" style="color:#8b949e">none</td></tr>`;
+
+  document.querySelector("#sig-table tbody").innerHTML =
+    Object.entries(s.signals || {}).map(([u, g]) => `<tr>
+      <td>${u}</td><td>${g.signal}</td><td>${g.score}</td>
+      <td>$${fmt(g.price)}</td><td>$${fmt(g.vwap)}</td><td>${fmt(g.rsi,1)}</td>
+      <td>${(g.at || "").slice(11,19)}</td></tr>`).join("")
+    || `<tr><td colspan="7" style="color:#8b949e">no scans yet</td></tr>`;
+
+  let trades = [];
+  try { trades = await (await fetch("/api/trades")).json(); } catch {}
+  document.querySelector("#closed-table tbody").innerHTML =
+    trades.map(t => `<tr>
+      <td>${t.symbol}</td><td>${t.direction}</td><td>${t.qty}</td>
+      <td>$${fmt(t.entry_premium)}</td><td>$${fmt(t.exit_premium)}</td><td>${t.status}</td>
+      <td class="${t.pnl >= 0 ? "pos" : "neg"}">${money(t.pnl)}</td></tr>`).join("")
+    || `<tr><td colspan="7" style="color:#8b949e">none yet</td></tr>`;
+}
+
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

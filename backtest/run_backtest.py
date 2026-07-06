@@ -1,64 +1,180 @@
 """
-Standalone backtest runner.
+Backtest the intraday options strategy on historical bars.
 
-Usage:
-    python backtest/run_backtest.py                 # backtest entire watchlist
-    python backtest/run_backtest.py AAPL MSFT NVDA  # specific symbols
-    python backtest/run_backtest.py --days 365       # custom lookback
+    python backtest/run_backtest.py --days 60 --equity 250000
+    python backtest/run_backtest.py SPY QQQ --days 90
+
+Option marks are SIMULATED with Black-Scholes off the underlying's intraday
+bars (same-day expiry, IV from recent realized volatility). Real 0DTE
+fills include spread, slippage and IV crush that this model only
+approximates — treat results as an upper bound, and validate in paper
+trading before believing any number here.
 """
 from __future__ import annotations
 
-import sys
-import os
 import argparse
+import math
+import sys
+from collections import defaultdict
+from datetime import datetime, time as dtime
+from pathlib import Path
 
-# Ensure project root is on the path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import pandas as pd
+
+from analysis.signals import Signal, generate_signal
+from backtest.bs import bs_price
 from config import Config
-from data.fetcher import fetch_bars, fetch_batch
-from backtest.engine import BacktestEngine
-from utils.logger import get_logger
+from data.market_data import ET, get_intraday_bars
 
-logger = get_logger("backtest_runner")
+EXPIRY_ET = dtime(16, 0)
+SPREAD_COST = 0.02  # assumed half-spread paid per side, in premium dollars
 
 
-def run(symbols: list[str], lookback_days: int = 500) -> None:
-    engine = BacktestEngine(initial_capital=Config.INITIAL_CAPITAL)
+def realized_iv(day_bars: pd.DataFrame, annualize: float = 252 * 78) -> float:
+    """Rough IV proxy: annualized stdev of 5-min log returns, floored."""
+    rets = day_bars["close"].pct_change().dropna()
+    if len(rets) < 5:
+        return 0.20
+    return max(float(rets.std() * math.sqrt(annualize)), 0.10)
 
-    results = []
-    data = fetch_batch(symbols, lookback_days=lookback_days)
 
-    for symbol, df in data.items():
-        result = engine.run(symbol, df)
-        results.append(result)
-        print(result.summary())
+def t_to_expiry_years(ts: pd.Timestamp) -> float:
+    expiry = ts.replace(hour=EXPIRY_ET.hour, minute=EXPIRY_ET.minute)
+    return max((expiry - ts).total_seconds(), 0) / (365 * 24 * 3600)
 
-    if not results:
-        print("No results — check your API keys and symbols.")
+
+def simulate_day(symbol: str, day_bars: pd.DataFrame, equity: float) -> list[dict]:
+    """Run the engine's entry/exit rules over one session of bars."""
+    trades: list[dict] = []
+    open_trade: dict | None = None
+    iv = realized_iv(day_bars)
+    entry_start = dtime(*map(int, Config.ENTRY_START.split(":")))
+    entry_cutoff = dtime(*map(int, Config.ENTRY_CUTOFF.split(":")))
+    flatten = dtime(*map(int, Config.FLATTEN_TIME.split(":")))
+
+    for i in range(6, len(day_bars)):
+        ts = day_bars.index[i]
+        window = day_bars.iloc[: i + 1]
+        spot = float(window["close"].iloc[-1])
+
+        # ---- manage open trade
+        if open_trade:
+            mark = bs_price(
+                spot, open_trade["strike"], t_to_expiry_years(ts), iv, open_trade["type"]
+            )
+            minutes_open = (ts - open_trade["opened"]).total_seconds() / 60
+            reason = None
+            if ts.time() >= flatten:
+                reason = "FLATTEN"
+            elif mark >= open_trade["target"]:
+                reason = "TP"
+            elif mark <= open_trade["stop"]:
+                reason = "SL"
+            elif minutes_open >= Config.MAX_HOLD_MINUTES:
+                reason = "TIME"
+            if reason:
+                exit_premium = max(mark - SPREAD_COST, 0.01)
+                open_trade["pnl"] = (
+                    (exit_premium - open_trade["entry"]) * 100 * open_trade["qty"]
+                )
+                open_trade["exit_reason"] = reason
+                trades.append(open_trade)
+                open_trade = None
+            continue
+
+        # ---- look for entries
+        if not (entry_start <= ts.time() <= entry_cutoff):
+            continue
+        result = generate_signal(window)
+        if result.signal == Signal.FLAT:
+            continue
+
+        opt_type = "call" if result.signal == Signal.LONG else "put"
+        # Strike: nearest whole dollar slightly OTM (~0.4-0.5 delta region).
+        strike = math.floor(spot) if opt_type == "put" else math.ceil(spot)
+        entry = bs_price(spot, strike, t_to_expiry_years(ts), iv, opt_type) + SPREAD_COST
+        if entry < 0.10:
+            continue
+
+        risk_per_contract = entry * 100 * Config.STOP_LOSS_PCT
+        qty = min(
+            int((equity * Config.RISK_PER_TRADE_PCT) // risk_per_contract),
+            int((equity * Config.MAX_POSITION_PCT) // (entry * 100)),
+            Config.MAX_CONTRACTS,
+        )
+        if qty < 1:
+            continue
+
+        open_trade = {
+            "symbol": symbol,
+            "date": ts.date().isoformat(),
+            "opened": ts,
+            "direction": result.signal.value,
+            "type": opt_type,
+            "strike": strike,
+            "qty": qty,
+            "entry": entry,
+            "stop": entry * (1 - Config.STOP_LOSS_PCT),
+            "target": entry * (1 + Config.TAKE_PROFIT_PCT),
+        }
+
+    return trades
+
+
+def run(symbols: list[str], days: int, equity: float) -> None:
+    all_trades: list[dict] = []
+    for symbol in symbols:
+        print(f"Fetching {days} days of {Config.BAR_MINUTES}-min bars for {symbol}…")
+        bars = get_intraday_bars(symbol, lookback_days=days)
+        if bars.empty:
+            print(f"  no data for {symbol} — skipping")
+            continue
+        for day, day_bars in bars.groupby(bars.index.date):
+            all_trades.extend(simulate_day(symbol, day_bars, equity))
+
+    if not all_trades:
+        print("No trades generated.")
         return
 
-    # Aggregate summary
-    total_trades = sum(len(r.trades) for r in results)
-    avg_return = sum(r.total_return for r in results) / len(results)
-    best = max(results, key=lambda r: r.total_return)
-    worst = min(results, key=lambda r: r.total_return)
+    df = pd.DataFrame(all_trades)
+    daily = df.groupby("date")["pnl"].sum()
+    wins = df[df["pnl"] > 0]
 
-    print(f"\n{'='*55}")
-    print(f"  AGGREGATE RESULTS ({len(results)} symbols)")
-    print(f"{'='*55}")
-    print(f"  Total Trades      : {total_trades}")
-    print(f"  Avg Return        : {avg_return:.2%}")
-    print(f"  Best Symbol       : {best.symbol} ({best.total_return:.2%})")
-    print(f"  Worst Symbol      : {worst.symbol} ({worst.total_return:.2%})")
-    print(f"{'='*55}\n")
+    print("\n========== BACKTEST RESULTS (simulated option marks) ==========")
+    print(f"Symbols          : {', '.join(symbols)}")
+    print(f"Account equity   : ${equity:,.0f}")
+    print(f"Trading days     : {daily.shape[0]}")
+    print(f"Trades           : {len(df)}  (avg {len(df)/daily.shape[0]:.1f}/day)")
+    print(f"Win rate         : {len(wins)/len(df):.0%}")
+    print(f"Total P&L        : ${df['pnl'].sum():+,.0f}")
+    print(f"Avg daily P&L    : ${daily.mean():+,.0f}   (median ${daily.median():+,.0f})")
+    print(f"Best / worst day : ${daily.max():+,.0f} / ${daily.min():+,.0f}")
+    print(f"Daily P&L stdev  : ${daily.std():,.0f}")
+    target = Config.DAILY_PROFIT_TARGET
+    print(
+        f"Days >= +${target:,.0f} : {(daily >= target).sum()} of {daily.shape[0]} "
+        f"({(daily >= target).mean():.0%})"
+    )
+    print("\nExit reasons:")
+    for reason, n in df["exit_reason"].value_counts().items():
+        print(f"  {reason:<8} {n}")
+    print(
+        "\n⚠ Simulated fills (Black-Scholes, fixed IV proxy, "
+        f"${SPREAD_COST:.02f} half-spread). Paper trade before trusting this."
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Backtest the options strategy")
+    parser.add_argument("symbols", nargs="*", default=None)
+    parser.add_argument("--days", type=int, default=30)
+    parser.add_argument("--equity", type=float, default=100_000)
+    args = parser.parse_args()
+    symbols = [s.upper() for s in args.symbols] or Config.UNDERLYINGS
+    run(symbols, args.days, args.equity)
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run strategy backtest")
-    parser.add_argument("symbols", nargs="*", help="Symbols to backtest (default: watchlist)")
-    parser.add_argument("--days", type=int, default=500, help="Lookback days (default: 500)")
-    args = parser.parse_args()
-
-    symbols = args.symbols if args.symbols else Config.WATCHLIST[:10]  # first 10 by default
-    run(symbols, lookback_days=args.days)
+    main()

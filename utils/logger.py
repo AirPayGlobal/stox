@@ -1,38 +1,33 @@
-"""
-Centralised logging configuration.
-"""
+"""Console + daily-rotating file logging."""
 import logging
 import os
-from datetime import datetime
+from datetime import date
 
-_LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "logs")
-os.makedirs(_LOG_DIR, exist_ok=True)
+from config import Config
+
+_FMT = "%(asctime)s | %(levelname)-7s | %(name)-12s | %(message)s"
 
 
 def get_logger(name: str) -> logging.Logger:
-    from config import Config
-
     logger = logging.getLogger(name)
     if logger.handlers:
         return logger
 
-    level = getattr(logging, Config.LOG_LEVEL.upper(), logging.INFO)
-    logger.setLevel(level)
+    logger.setLevel(Config.LOG_LEVEL.upper())
 
-    fmt = logging.Formatter(
-        "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+    console = logging.StreamHandler()
+    console.setFormatter(logging.Formatter(_FMT))
+    logger.addHandler(console)
 
-    # Console handler
-    ch = logging.StreamHandler()
-    ch.setFormatter(fmt)
-    logger.addHandler(ch)
+    try:
+        os.makedirs(Config.STATE_DIR, exist_ok=True)
+        fh = logging.FileHandler(
+            os.path.join(Config.STATE_DIR, f"{date.today().isoformat()}.log")
+        )
+        fh.setFormatter(logging.Formatter(_FMT))
+        logger.addHandler(fh)
+    except OSError:
+        pass  # read-only filesystem (e.g. some containers) — console only
 
-    # File handler (rotates daily by filename)
-    log_file = os.path.join(_LOG_DIR, f"{datetime.now():%Y-%m-%d}.log")
-    fh = logging.FileHandler(log_file)
-    fh.setFormatter(fmt)
-    logger.addHandler(fh)
-
+    logger.propagate = False
     return logger
