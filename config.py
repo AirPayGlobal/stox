@@ -89,6 +89,11 @@ class Config:
     SWEEP_TREND_FILTER: bool = _b("SWEEP_TREND_FILTER", False)
     SWEEP_PREV_DAY_LEVELS: bool = _b("SWEEP_PREV_DAY_LEVELS", True)
     SWEEP_OVERNIGHT_RANGE: bool = _b("SWEEP_OVERNIGHT_RANGE", True)
+    # Optional ET time window that redefines the overnight range, e.g.
+    # "04:00-09:30" = pre-market only (the London-overlap session). A window
+    # spanning midnight ("18:00-02:00") starts on the prior calendar day.
+    # Empty = full overnight (prior 16:00 close -> today's 09:30 open).
+    SWEEP_SESSION_WINDOW: str = os.getenv("SWEEP_SESSION_WINDOW", "").strip()
     SWEEP_ENTRY: str = os.getenv("SWEEP_ENTRY", "close").lower()  # "close" | "retrace"
     SWEEP_RETRACE_EXPIRY_MIN: int = _i("SWEEP_RETRACE_EXPIRY_MIN", 60)
     SWEEP_DISASTER_STOP_PCT: float = _f("SWEEP_DISASTER_STOP_PCT", 0.60)

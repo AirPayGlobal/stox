@@ -34,8 +34,18 @@ from analysis.sweeps import (
     overnight_range,
     prev_day_level_sweep,
     rr_target,
+    session_range,
     sweep_reclaim,
 )
+
+
+def _range_levels(bars_ext, day):
+    """Overnight or configured session window levels for `day`."""
+    if not Config.SWEEP_OVERNIGHT_RANGE:
+        return None
+    if Config.SWEEP_SESSION_WINDOW:
+        return session_range(bars_ext, day, Config.SWEEP_SESSION_WINDOW)
+    return overnight_range(bars_ext, day)
 from backtest.bs import bs_price
 from config import Config
 from data.market_data import get_intraday_bars
@@ -272,7 +282,7 @@ def run(symbols: list[str], days: int, equity: float, strategy: str) -> None:
                     t["strategy"] = "orb"
                     all_trades.append(t)
             if "sweep" in strategies:
-                onr = overnight_range(bars_ext, day) if Config.SWEEP_OVERNIGHT_RANGE else None
+                onr = _range_levels(bars_ext, day)
                 for t in simulate_day_sweep(symbol, prev_bars, day_bars, equity, onr=onr):
                     t["strategy"] = "sweep"
                     all_trades.append(t)
