@@ -94,6 +94,15 @@ class Config:
     # spanning midnight ("18:00-02:00") starts on the prior calendar day.
     # Empty = full overnight (prior 16:00 close -> today's 09:30 open).
     SWEEP_SESSION_WINDOW: str = os.getenv("SWEEP_SESSION_WINDOW", "").strip()
+
+    # ------------------------------------------------------------ Swing (backtest-only)
+    # 4H-native sweep-reclaim held across days — exists in the backtester to
+    # evaluate the hybrid idea BEFORE any live implementation.
+    SWING_TIMEFRAME_MINUTES: int = _i("SWING_TIMEFRAME_MINUTES", 240)
+    SWING_BAR_MINUTES: int = _i("SWING_BAR_MINUTES", 30)
+    SWING_RR: float = _f("SWING_RR", 2.0)
+    SWING_MAX_HOLD_DAYS: int = _i("SWING_MAX_HOLD_DAYS", 7)
+    SWING_DTE: int = _i("SWING_DTE", 14)                     # contract expiry at entry
     SWEEP_ENTRY: str = os.getenv("SWEEP_ENTRY", "close").lower()  # "close" | "retrace"
     SWEEP_RETRACE_EXPIRY_MIN: int = _i("SWEEP_RETRACE_EXPIRY_MIN", 60)
     SWEEP_DISASTER_STOP_PCT: float = _f("SWEEP_DISASTER_STOP_PCT", 0.60)

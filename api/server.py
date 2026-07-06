@@ -136,6 +136,29 @@ def api_start(dry_run: bool = False, _: str = Depends(_auth)):
     return {"ok": ok, "message": message, "dry_run": dry_run}
 
 
+@app.post("/api/backtest")
+def api_backtest(
+    strategy: str = "all",
+    days: int = 30,
+    equity: float = 100_000.0,
+    symbols: str = "",
+    _: str = Depends(_auth),
+):
+    """Run a backtest server-side and return the results summary. Synchronous:
+    expect a few seconds per symbol (data fetch + simulation)."""
+    if strategy not in ("orb", "sweep", "swing", "both", "all"):
+        return {"error": f"unknown strategy '{strategy}'"}
+    days = max(5, min(days, 365))
+    syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] or Config.UNDERLYINGS
+    from backtest.run_backtest import run_backtest
+
+    try:
+        return run_backtest(syms, days, equity, strategy)
+    except Exception as exc:
+        logger.error(f"Backtest failed: {exc}", exc_info=True)
+        return {"error": str(exc)}
+
+
 @app.post("/api/stop")
 def api_stop(_: str = Depends(_auth)):
     if _engine is None or not _engine.running:
