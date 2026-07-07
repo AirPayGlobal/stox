@@ -136,6 +136,43 @@ def api_start(dry_run: bool = False, _: str = Depends(_auth)):
     return {"ok": ok, "message": message, "dry_run": dry_run}
 
 
+def _book():
+    """Engine's live book when running, else the persisted book from disk."""
+    if _engine is not None:
+        return _engine.book
+    from trading.positions import PositionBook
+
+    return PositionBook()
+
+
+@app.get("/api/report")
+def api_report(days: int = 30, _: str = Depends(_auth)):
+    from reporting import period_report
+
+    return period_report(_book(), max(1, min(days, 365)))
+
+
+@app.get("/api/report/daily")
+def api_report_daily(date: str = "", _: str = Depends(_auth)):
+    from reporting import daily_report
+
+    return daily_report(_book(), date or None)
+
+
+@app.get("/api/report/export")
+def api_report_export(days: int = 90, _: str = Depends(_auth)):
+    from fastapi.responses import PlainTextResponse
+
+    from reporting import trades_csv
+
+    csv_text = trades_csv(_book(), max(1, min(days, 365)))
+    return PlainTextResponse(
+        csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="stox-trades-{days}d.csv"'},
+    )
+
+
 @app.post("/api/backtest")
 def api_backtest(
     strategy: str = "all",
