@@ -67,6 +67,19 @@
   <th>Contract</th><th>Dir</th><th>Qty</th><th>Entry</th><th>Exit</th><th>Reason</th><th>P&amp;L</th>
 </tr></thead><tbody></tbody></table>
 
+<h2>Reports</h2>
+<div class="bar-wrap">
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <button class="dry" onclick="loadReport(7)">7 days</button>
+    <button class="dry" onclick="loadReport(30)">30 days</button>
+    <button class="dry" onclick="loadReport(90)">90 days</button>
+    <a id="csv-link" href="/api/report/export?days=90"
+       style="color:#58a6ff; margin-left:auto">⬇ Export CSV</a>
+    <span id="rep-status" style="color:#8b949e"></span>
+  </div>
+  <div id="rep-results" style="margin-top:12px"></div>
+</div>
+
 <h2>Backtest</h2>
 <div class="bar-wrap" id="bt-form">
   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
@@ -204,8 +217,66 @@ async function runBacktest() {
   }
 }
 
+function statRow(name, s) {
+  return `<tr><td>${name}</td><td>${s.trades}</td><td>${fmt(s.win_rate*100,0)}%</td>
+    <td class="${s.pnl >= 0 ? "pos" : "neg"}">${money(s.pnl)}</td>
+    <td>${money(s.avg_win)} / ${money(s.avg_loss)}</td>
+    <td>${s.profit_factor ?? "—"}</td></tr>`;
+}
+
+async function loadReport(days) {
+  const st = document.getElementById("rep-status"), box = document.getElementById("rep-results");
+  document.getElementById("csv-link").href = "/api/report/export?days=" + days;
+  st.textContent = "loading…";
+  let r;
+  try { r = await (await fetch("/api/report?days=" + days)).json(); }
+  catch (e) { st.textContent = "failed: " + e; return; }
+  if (!r.totals) { st.textContent = r.message || "no data"; box.innerHTML = ""; return; }
+  st.textContent = `${r.from} → ${r.to}`;
+
+  let html = `<div class="cards">` +
+    card("Net P&L", money(r.totals.pnl), r.totals.pnl >= 0 ? "pos" : "neg") +
+    card("Trades / win rate", `${r.totals.trades} · ${fmt(r.totals.win_rate*100,0)}%`) +
+    card("Profit factor", r.totals.profit_factor ?? "—") +
+    card("Avg day", money(r.avg_day), r.avg_day >= 0 ? "pos" : "neg") +
+    card("Green days", `${r.green_days} of ${r.trading_days}`) +
+    card("Best / worst day", `${money(r.best_day)} / ${money(r.worst_day)}`) +
+    card("Max drawdown", money(-r.max_drawdown), "neg") +
+    `</div>`;
+
+  html += `<h2>By strategy</h2><table><thead><tr>
+    <th></th><th>Trades</th><th>Win rate</th><th>P&L</th><th>Avg win / loss</th><th>PF</th>
+    </tr></thead><tbody>` +
+    Object.entries(r.per_strategy).map(([k, s]) => statRow(k, s)).join("") +
+    `</tbody></table>`;
+
+  html += `<h2>By underlying</h2><table><thead><tr>
+    <th></th><th>Trades</th><th>Win rate</th><th>P&L</th><th>Avg win / loss</th><th>PF</th>
+    </tr></thead><tbody>` +
+    Object.entries(r.per_underlying).map(([k, s]) => statRow(k, s)).join("") +
+    `</tbody></table>`;
+
+  html += `<h2>Exit reasons</h2><table><thead><tr><th>Reason</th><th>Count</th><th>P&L</th>
+    </tr></thead><tbody>` +
+    Object.entries(r.exit_reasons).map(([k, v]) => `<tr><td>${k}</td><td>${v.count}</td>
+      <td class="${v.pnl >= 0 ? "pos" : "neg"}">${money(v.pnl)}</td></tr>`).join("") +
+    `</tbody></table>`;
+
+  html += `<h2>Daily</h2><table><thead><tr>
+    <th>Date</th><th>Trades</th><th>Win rate</th><th>P&L</th><th>Cumulative</th>
+    </tr></thead><tbody>` +
+    r.daily.slice().reverse().map(d => `<tr><td>${d.date}</td><td>${d.trades}</td>
+      <td>${fmt(d.win_rate*100,0)}%</td>
+      <td class="${d.pnl >= 0 ? "pos" : "neg"}">${money(d.pnl)}</td>
+      <td class="${d.cumulative >= 0 ? "pos" : "neg"}">${money(d.cumulative)}</td></tr>`).join("") +
+    `</tbody></table>`;
+
+  box.innerHTML = html;
+}
+
 refresh();
 setInterval(refresh, 10000);
+loadReport(30);
 </script>
 </body>
 </html>
