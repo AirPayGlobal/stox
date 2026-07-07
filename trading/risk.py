@@ -1,11 +1,20 @@
 """
 Risk management: position sizing and the daily governor.
 
-The governor is what makes this a *day*trading system rather than a slot
-machine:
-  * once day P&L >= DAILY_PROFIT_TARGET, no new trades — the day is done
-  * once day P&L <= -DAILY_MAX_LOSS, trading halts and everything is flattened
+The governor operates on the ENGINE's own day P&L — realized P&L from the
+engine's closed trades plus unrealized P&L on the option positions it
+manages — NOT total account equity. Total equity can be contaminated by
+positions the engine never opened (leftover shares, corporate-action
+artifacts), whose fluctuation would otherwise false-trigger the target or
+the loss halt.
+
+  * reaching DAILY_PROFIT_TARGET arms a trailing profit floor (trading
+    continues; falling back to the floor banks the day)
+  * day P&L <= -DAILY_MAX_LOSS is a hard halt (flatten + stop)
   * hard caps on trades/day and concurrent positions
+
+Sizing uses the engine's tradable equity (account equity minus the value
+of unmanaged positions) so junk in the account can't inflate position size.
 """
 from __future__ import annotations
 
@@ -23,7 +32,6 @@ logger = get_logger("risk")
 @dataclass
 class DayState:
     day: date = field(default_factory=date.today)
-    start_equity: float = 0.0
     trades_opened: int = 0
     target_hit: bool = False       # armed profit protection (trading continues)
     peak_pnl: float = 0.0
@@ -32,8 +40,8 @@ class DayState:
 
 
 class RiskManager:
-    """Day state is persisted to disk so a restart or redeploy mid-session
-    keeps the same P&L baseline, trade count, and governor locks."""
+    """Day state is persisted so a restart mid-session keeps the same trade
+    count, peak P&L, and governor locks."""
 
     def __init__(self) -> None:
         self.state = DayState()
@@ -41,21 +49,23 @@ class RiskManager:
         self._load()
 
     # ------------------------------------------------------------ Day lifecycle
-    def start_day(self, equity: float) -> None:
-        self.state = DayState(start_equity=equity)
+    def start_day(self) -> None:
+        self.state = DayState()
         logger.info(
-            f"Day started | equity=${equity:,.2f} "
-            f"target=+${Config.DAILY_PROFIT_TARGET:,.0f} "
+            f"Day started | target=+${Config.DAILY_PROFIT_TARGET:,.0f} "
             f"max_loss=-${Config.DAILY_MAX_LOSS:,.0f}"
         )
         self._save()
 
-    def ensure_today(self, equity: float) -> None:
-        if self.state.day != date.today() or self.state.start_equity == 0:
-            self.start_day(equity)
+    def ensure_today(self) -> None:
+        if self.state.day != date.today():
+            self.start_day()
 
-    def day_pnl(self, equity: float) -> float:
-        return equity - self.state.start_equity
+    def reset(self) -> None:
+        """Clear the day's governor state (e.g. to release a stale halt)."""
+        self.state = DayState()
+        self._save()
+        logger.info("Day governor reset")
 
     # ------------------------------------------------------------ Governor
     def profit_floor(self) -> float:
@@ -65,15 +75,10 @@ class RiskManager:
             self.state.peak_pnl * (1 - Config.PROFIT_GIVEBACK_PCT),
         )
 
-    def update_governor(self, equity: float) -> None:
-        """Re-evaluate protection/halt state. Locks are sticky for the day.
-
-        Reaching the profit target does NOT stop trading: it arms a trailing
-        giveback floor that ratchets with the day's peak P&L. Falling back to
-        the floor banks the day (protect_locked). The loss side is a hard halt.
-        """
+    def update_governor(self, pnl: float) -> None:
+        """Re-evaluate protection/halt state from the engine's day P&L.
+        Locks are sticky for the day."""
         s = self.state
-        pnl = self.day_pnl(equity)
 
         if pnl > s.peak_pnl:
             s.peak_pnl = pnl
@@ -102,8 +107,8 @@ class RiskManager:
             logger.warning(f"🛑 DAILY MAX LOSS HIT: ${pnl:,.2f} — halting for the day")
             self._save()
 
-    def can_open(self, equity: float, open_positions: int) -> tuple[bool, str]:
-        self.update_governor(equity)
+    def can_open(self, pnl: float, open_positions: int) -> tuple[bool, str]:
+        self.update_governor(pnl)
         s = self.state
         if s.loss_halted:
             return False, "daily max loss reached"
@@ -151,17 +156,13 @@ class RiskManager:
             if raw.get("day") == date.today().isoformat():
                 self.state = DayState(
                     day=date.today(),
-                    start_equity=float(raw.get("start_equity", 0.0)),
                     trades_opened=int(raw.get("trades_opened", 0)),
                     target_hit=bool(raw.get("target_hit", False)),
                     peak_pnl=float(raw.get("peak_pnl", 0.0)),
                     protect_locked=bool(raw.get("protect_locked", False)),
                     loss_halted=bool(raw.get("loss_halted", False)),
                 )
-                logger.info(
-                    f"Restored day state | baseline=${self.state.start_equity:,.2f} "
-                    f"trades={self.state.trades_opened}"
-                )
+                logger.info(f"Restored day state | trades={self.state.trades_opened}")
         except FileNotFoundError:
             pass
         except (OSError, ValueError, TypeError) as exc:
@@ -174,6 +175,7 @@ class RiskManager:
           * loss at the stop (premium * STOP_LOSS_PCT) <= RISK_PER_TRADE_PCT of equity
           * total premium outlay <= MAX_POSITION_PCT of equity
           * qty <= MAX_CONTRACTS
+        `equity` is the engine's tradable equity (junk positions excluded).
         """
         if premium <= 0 or equity <= 0:
             return 0
@@ -205,12 +207,11 @@ class RiskManager:
         return max(0, min(by_risk, by_outlay, Config.MAX_CONTRACTS))
 
     # ------------------------------------------------------------ Introspection
-    def snapshot(self, equity: float) -> dict:
+    def snapshot(self, pnl: float) -> dict:
         s = self.state
         return {
             "day": s.day.isoformat(),
-            "start_equity": s.start_equity,
-            "day_pnl": round(self.day_pnl(equity), 2),
+            "day_pnl": round(pnl, 2),
             "peak_pnl": round(s.peak_pnl, 2),
             "profit_target": Config.DAILY_PROFIT_TARGET,
             "max_loss": Config.DAILY_MAX_LOSS,
