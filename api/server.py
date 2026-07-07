@@ -201,6 +201,16 @@ def api_backtest(
         return {"error": str(exc)}
 
 
+@app.post("/api/reset-day")
+def api_reset_day(_: str = Depends(_auth)):
+    """Clear the day's governor state — releases a stuck halt/protect lock."""
+    if _engine is None:
+        return {"ok": False, "message": "engine not started"}
+    _engine.risk.reset()
+    logger.info("Day governor reset via API")
+    return {"ok": True}
+
+
 @app.post("/api/stop")
 def api_stop(_: str = Depends(_auth)):
     if _engine is None or not _engine.running:

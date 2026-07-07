@@ -71,6 +71,8 @@ class TradingEngine:
         self.running = False
         self.last_scan = 0.0
         self.last_reconcile = 0.0
+        self._open_unrealized = 0.0   # marked unrealized P&L on managed positions
+        self._unmanaged_value = 0.0   # $ value of non-engine broker positions
         self.last_signals: dict[str, dict] = {}
         self.last_equity: float = 0.0
         # sweep bookkeeping
@@ -141,8 +143,11 @@ class TradingEngine:
                 )
 
         # Share positions (e.g. from an ITM option auto-exercise at expiry)
-        # are NOT managed by this engine — surface them loudly instead.
+        # are NOT managed by this engine — surface them loudly instead. Their
+        # market value is excluded from tradable equity so it can't inflate
+        # position sizing or contaminate the day-P&L governor.
         self.unmanaged_stock = get_stock_positions()
+        self._unmanaged_value = sum(p["market_value"] for p in self.unmanaged_stock.values())
         for sym, pos in self.unmanaged_stock.items():
             logger.warning(
                 f"⚠ UNMANAGED share position at broker: {pos['qty']:.0f}x {sym} "
@@ -165,31 +170,46 @@ class TradingEngine:
                 logger.error(f"Periodic reconciliation failed: {exc}")
 
         account = get_account()
-        equity = self.last_equity = account["equity"]
-        self.risk.ensure_today(equity)
+        self.last_equity = account["equity"]
+        self.risk.ensure_today()
 
         now_et = datetime.now(ET).time()
         in_flatten_window = now_et >= _parse_hhmm(Config.FLATTEN_TIME)
 
+        # manage_positions marks every open position -> refreshes engine P&L.
         self.manage_positions(flatten_all=in_flatten_window or self.risk.must_flatten())
-        self.risk.update_governor(equity)
+        self.risk.update_governor(self.engine_day_pnl())
 
         if in_flatten_window:
             self.pending.clear()
             return
 
+        equity = self.tradable_equity()
         self.check_pending(equity)
 
         if time.time() - self.last_scan >= Config.SCAN_SECONDS:
             self.last_scan = time.time()
-            self.scan_for_entries(account)
+            self.scan_for_entries(equity)
+
+    # ---- engine-relative P&L / equity (immune to non-engine account holdings)
+    def engine_day_pnl(self) -> float:
+        """Realized P&L from the engine's trades today + unrealized on the
+        option positions it currently manages."""
+        return round(self.book.realized_today() + self._open_unrealized, 2)
+
+    def tradable_equity(self) -> float:
+        """Account equity minus the value of positions the engine doesn't
+        manage — the capital base used for sizing."""
+        return max(self.last_equity - self._unmanaged_value, 0.0)
 
     # ================================================================= Exits
     def manage_positions(self, flatten_all: bool = False) -> None:
         ul_prices: dict[str, float | None] = {}
+        unrealized = 0.0
         for trade in list(self.book.open_trades):
             mark = get_option_mid(trade.symbol)
             if mark is None:
+                unrealized += trade.unrealized(trade.entry_premium)  # unknown mark -> flat
                 continue
 
             reason = None
@@ -203,7 +223,10 @@ class TradingEngine:
                 reason = self._premium_exit(trade, mark)
 
             if reason:
-                self._close(trade.symbol, mark, reason)
+                self._close(trade.symbol, mark, reason)  # -> realized_today()
+            else:
+                unrealized += trade.unrealized(mark)      # still open
+        self._open_unrealized = unrealized
 
     def _premium_exit(self, trade, mark: float) -> str | None:
         if mark >= trade.target_premium:
@@ -252,14 +275,14 @@ class TradingEngine:
             self.book.close(symbol, mark, reason)
 
     # ================================================================= Entries
-    def scan_for_entries(self, account: dict) -> None:
+    def scan_for_entries(self, equity: float) -> None:
         now_et = datetime.now(ET).time()
         if not (_parse_hhmm(Config.ENTRY_START) <= now_et <= _parse_hhmm(Config.ENTRY_CUTOFF)):
             return
 
-        equity = account["equity"]
+        pnl = self.engine_day_pnl()
         for underlying in Config.UNDERLYINGS:
-            ok, why = self.risk.can_open(equity, len(self.book.open_trades))
+            ok, why = self.risk.can_open(pnl, len(self.book.open_trades))
             if not ok:
                 logger.info(f"Not scanning further: {why}")
                 return
@@ -451,7 +474,7 @@ class TradingEngine:
             if not triggered:
                 continue
             del self.pending[underlying]
-            ok, why = self.risk.can_open(equity, len(self.book.open_trades))
+            ok, why = self.risk.can_open(self.engine_day_pnl(), len(self.book.open_trades))
             if not ok:
                 logger.info(f"Retrace triggered but cannot open: {why}")
                 continue
@@ -482,7 +505,7 @@ class TradingEngine:
             return
 
         premium = contract.ask  # assume paying the offer on a market order
-        equity = self.last_equity
+        equity = self.tradable_equity()
         if strategy == "sweep":
             qty = self.risk.contracts_for_underlying_stop(
                 equity, premium, contract.delta, abs(spot - stop_underlying)
@@ -525,14 +548,14 @@ class TradingEngine:
 
     # ================================================================= Status
     def status(self) -> dict:
-        equity = self.last_equity
         return {
             "running": self.running,
             "dry_run": self.dry_run,
             "mode": Config.ALPACA_MODE,
             "strategy": Config.STRATEGY,
-            "equity": equity,
-            "risk": self.risk.snapshot(equity) if equity else {},
+            "equity": self.last_equity,
+            "tradable_equity": round(self.tradable_equity(), 2),
+            "risk": self.risk.snapshot(self.engine_day_pnl()),
             "book": self.book.summary(),
             "unmanaged_stock_positions": self.unmanaged_stock,
             "signals": self.last_signals,

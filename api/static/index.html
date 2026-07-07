@@ -43,6 +43,8 @@
   <button onclick="control('start')">▶ Start</button>
   <button class="dry" onclick="control('start?dry_run=true')">▶ Start (dry run)</button>
   <button class="stop" onclick="control('stop')">■ Stop</button>
+  <button onclick="if(confirm('Reset the day governor (clear halt/protection)?'))control('reset-day')"
+          style="background:#6e40c9">↺ Reset day</button>
 </div>
 
 <div id="warn-banner" style="display:none; background:#3d1d1f; border:1px solid #f85149;
@@ -132,7 +134,9 @@ async function refresh() {
   badge.textContent = s.running ? (s.dry_run ? "DRY RUN" : "RUNNING") : "STOPPED";
   badge.className = "badge " + (s.running ? "on" : "off");
   document.getElementById("mode-line").textContent =
-    `mode: ${s.mode || "—"} · equity: $${fmt(s.equity, 0)}`;
+    `mode: ${s.mode || "—"} · account equity: $${fmt(s.equity, 0)}` +
+    (s.tradable_equity != null && s.tradable_equity !== s.equity
+      ? ` · tradable: $${fmt(s.tradable_equity, 0)}` : "");
 
   const warn = document.getElementById("warn-banner");
   const stock = s.unmanaged_stock_positions || {};
