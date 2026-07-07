@@ -129,6 +129,10 @@ class Config:
     # ------------------------------------------------------------ Engine
     LOOP_SECONDS: int = _i("LOOP_SECONDS", 30)               # position-management tick
     SCAN_SECONDS: int = _i("SCAN_SECONDS", 300)              # entry-scan cadence
+    # Re-sync the book with the broker's actual positions this often while
+    # the market is open (adopts orphans opened by e.g. a dying container
+    # during a deploy cutover; boot-only reconciliation missed those).
+    RECONCILE_SECONDS: int = _i("RECONCILE_SECONDS", 180)
     # Start the engine automatically when the server boots (dashboard Stop
     # still works; set false to require pressing Start).
     ENGINE_AUTOSTART: bool = _b("ENGINE_AUTOSTART", True)

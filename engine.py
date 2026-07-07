@@ -69,6 +69,7 @@ class TradingEngine:
         self.book = PositionBook()
         self.running = False
         self.last_scan = 0.0
+        self.last_reconcile = 0.0
         self.last_signals: dict[str, dict] = {}
         self.last_equity: float = 0.0
         # sweep bookkeeping
@@ -140,6 +141,16 @@ class TradingEngine:
     def tick(self) -> None:
         if not is_market_open():
             return
+
+        # Periodic broker re-sync: adopts positions the book doesn't know
+        # (e.g. opened by an old container during a deploy cutover) so they
+        # come under stop/flatten management within minutes, not never.
+        if not self.dry_run and time.time() - self.last_reconcile >= Config.RECONCILE_SECONDS:
+            self.last_reconcile = time.time()
+            try:
+                self.reconcile_with_broker()
+            except Exception as exc:
+                logger.error(f"Periodic reconciliation failed: {exc}")
 
         account = get_account()
         equity = self.last_equity = account["equity"]

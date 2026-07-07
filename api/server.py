@@ -106,7 +106,12 @@ def _auth(request: Request) -> str:
 @app.get("/healthz")
 def healthz():
     """Unauthenticated liveness/version probe."""
-    return {"ok": True, "app": "stox-options", "version": APP_VERSION}
+    return {
+        "ok": True,
+        "app": "stox-options",
+        "version": APP_VERSION,
+        "state_dir": Config.STATE_DIR,  # "/data" = persistent volume in use
+    }
 
 
 @app.get("/")
