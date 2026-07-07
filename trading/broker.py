@@ -67,6 +67,22 @@ def get_option_positions() -> dict[str, dict]:
     return out
 
 
+def get_stock_positions() -> dict[str, dict]:
+    """Non-option positions at the broker (e.g. shares from an ITM option
+    auto-exercise). The engine does NOT manage these — surfaced as warnings."""
+    out: dict[str, dict] = {}
+    for pos in _trading().get_all_positions():
+        is_option = str(getattr(pos, "asset_class", "")).endswith("option") or len(pos.symbol) > 12
+        if not is_option:
+            out[pos.symbol] = {
+                "qty": float(pos.qty),
+                "avg_entry": float(pos.avg_entry_price),
+                "market_value": float(pos.market_value or 0),
+                "unrealized_pl": float(pos.unrealized_pl or 0),
+            }
+    return out
+
+
 def buy_option(symbol: str, qty: int) -> str | None:
     """Market-buy `qty` contracts. Returns the order id, or None on failure."""
     from alpaca.trading.enums import OrderSide, TimeInForce

@@ -45,6 +45,9 @@
   <button class="stop" onclick="control('stop')">■ Stop</button>
 </div>
 
+<div id="warn-banner" style="display:none; background:#3d1d1f; border:1px solid #f85149;
+  border-radius:8px; padding:12px; margin-bottom:16px; color:#ffa198"></div>
+
 <div class="bar-wrap">
   <div class="label">Day P&amp;L vs target <span id="pnl-text"></span></div>
   <div class="bar"><div id="pnl-bar" style="width:0%"></div></div>
@@ -130,6 +133,20 @@ async function refresh() {
   badge.className = "badge " + (s.running ? "on" : "off");
   document.getElementById("mode-line").textContent =
     `mode: ${s.mode || "—"} · equity: $${fmt(s.equity, 0)}`;
+
+  const warn = document.getElementById("warn-banner");
+  const stock = s.unmanaged_stock_positions || {};
+  if (Object.keys(stock).length) {
+    warn.style.display = "block";
+    warn.innerHTML = "⚠ <b>Unmanaged share positions at the broker</b> (likely from an " +
+      "in-the-money option expiring — auto-exercise). The engine does not manage these; " +
+      "close them manually in Alpaca:<br>" +
+      Object.entries(stock).map(([sym, p]) =>
+        `&nbsp;&nbsp;${p.qty} × ${sym} — value $${fmt(p.market_value,0)}, ` +
+        `P&L ${money(p.unrealized_pl)}`).join("<br>");
+  } else {
+    warn.style.display = "none";
+  }
 
   const r = s.risk || {}, b = s.book || {};
   const pnl = r.day_pnl ?? 0, target = r.profit_target ?? 1;

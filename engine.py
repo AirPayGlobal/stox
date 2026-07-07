@@ -46,6 +46,7 @@ from trading.broker import (
     close_option_position,
     get_account,
     get_option_positions,
+    get_stock_positions,
     is_market_open,
 )
 from trading.positions import PositionBook
@@ -75,6 +76,7 @@ class TradingEngine:
         # sweep bookkeeping
         self._acted_sweeps: set[str] = set()          # candle dedupe keys
         self.pending: dict[str, dict] = {}            # underlying -> retrace setup
+        self.unmanaged_stock: dict[str, dict] = {}    # broker share positions (warning)
         mode = "DRY RUN" if dry_run else Config.ALPACA_MODE.upper()
         logger.info(
             f"Engine ready | mode={mode} | strategy={Config.STRATEGY} | "
@@ -137,6 +139,16 @@ class TradingEngine:
                 logger.warning(
                     f"Book trade {trade.symbol} not held at broker — closed as EXTERNAL"
                 )
+
+        # Share positions (e.g. from an ITM option auto-exercise at expiry)
+        # are NOT managed by this engine — surface them loudly instead.
+        self.unmanaged_stock = get_stock_positions()
+        for sym, pos in self.unmanaged_stock.items():
+            logger.warning(
+                f"⚠ UNMANAGED share position at broker: {pos['qty']:.0f}x {sym} "
+                f"(value ${pos['market_value']:,.0f}, P&L ${pos['unrealized_pl']:+,.0f}) "
+                f"— likely option auto-exercise; close it manually"
+            )
 
     def tick(self) -> None:
         if not is_market_open():
@@ -522,6 +534,7 @@ class TradingEngine:
             "equity": equity,
             "risk": self.risk.snapshot(equity) if equity else {},
             "book": self.book.summary(),
+            "unmanaged_stock_positions": self.unmanaged_stock,
             "signals": self.last_signals,
             "pending": {
                 u: {
