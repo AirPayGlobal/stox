@@ -26,7 +26,8 @@ from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
 
 from analysis.htf import completed_bars, resample_bars
-from analysis.signals import Signal, generate_signal
+from analysis.indicators import daily_atr_from_daily_bars, relative_volume
+from analysis.signals import Signal, SignalContext, generate_signal
 from analysis.sweeps import (
     SweepSignal,
     find_fvg,
@@ -39,7 +40,12 @@ from analysis.sweeps import (
     sweep_reclaim,
 )
 from config import Config
-from data.market_data import get_intraday_bars, get_latest_price, get_today_bars
+from data.market_data import (
+    get_daily_bars,
+    get_intraday_bars,
+    get_latest_price,
+    get_today_bars,
+)
 from data.options_data import _parse_occ, get_option_mid
 from options.contracts import select_contract
 from trading.broker import (
@@ -80,6 +86,7 @@ class TradingEngine:
         self._acted_sweeps: set[str] = set()          # candle dedupe keys
         self.pending: dict[str, dict] = {}            # underlying -> retrace setup
         self.unmanaged_stock: dict[str, dict] = {}    # broker share positions (warning)
+        self._daily_atr_cache: dict[str, tuple] = {}  # underlying -> (date, atr)
         mode = "DRY RUN" if dry_run else Config.ALPACA_MODE.upper()
         logger.info(
             f"Engine ready | mode={mode} | strategy={Config.STRATEGY} | "
@@ -218,6 +225,8 @@ class TradingEngine:
             if mark is None:
                 unrealized += trade.unrealized(trade.entry_premium)  # unknown mark -> flat
                 continue
+            trade.mfe_premium = max(trade.mfe_premium, mark)
+            trade.mae_premium = min(trade.mae_premium, mark)
 
             reason = None
             if flatten_all:
@@ -318,10 +327,37 @@ class TradingEngine:
                 return f"{kind} cooldown ({elapsed:.0f}/{cooldown} min)"
         return None
 
+    def _daily_atr(self, underlying: str) -> float | None:
+        today = datetime.now(ET).date()
+        cached = self._daily_atr_cache.get(underlying)
+        if cached and cached[0] == today:
+            return cached[1]
+        value = daily_atr_from_daily_bars(get_daily_bars(underlying, days=30))
+        self._daily_atr_cache[underlying] = (today, value)
+        return value
+
+    def _signal_context(self, underlying: str, today_bars) -> SignalContext:
+        rvol = None
+        try:
+            multi = get_intraday_bars(
+                underlying, lookback_days=Config.RVOL_LOOKBACK_DAYS + 4
+            )
+            if not multi.empty:
+                today = datetime.now(ET).date()
+                prior = [
+                    g["volume"] for d, g in multi.groupby(multi.index.date) if d < today
+                ]
+                rvol = relative_volume(today_bars["volume"], prior[-Config.RVOL_LOOKBACK_DAYS:])
+        except Exception as exc:
+            logger.warning(f"RVOL context failed for {underlying}: {exc}")
+        return SignalContext(daily_atr=self._daily_atr(underlying), rvol=rvol)
+
     # ------------------------------------------------------------ ORB momentum
     def _scan_orb(self, underlying: str, equity: float) -> None:
         bars = get_today_bars(underlying)
-        result = generate_signal(bars)
+        if bars.empty:
+            return
+        result = generate_signal(bars, self._signal_context(underlying, bars))
         self.last_signals[f"{underlying}·orb"] = {
             "signal": result.signal.value,
             "score": result.score,
@@ -528,6 +564,15 @@ class TradingEngine:
             logger.info(f"{underlying}: sized to 0 contracts — skipping ({note})")
             return
 
+        if strategy == "sweep":
+            planned_risk = (
+                min(abs(contract.delta or 0.5) * abs(spot - stop_underlying), premium)
+                * 100 * qty
+            )
+        else:
+            planned_risk = premium * Config.STOP_LOSS_PCT * 100 * qty
+        spread_at_entry = contract.ask - contract.bid
+
         logger.info(
             f"ENTRY [{strategy}] {direction.value} {underlying} | {note} | "
             f"{qty}x {contract.symbol} @ ~${premium:.2f} "
@@ -545,6 +590,7 @@ class TradingEngine:
                 contract.symbol, underlying, direction.value, qty, premium,
                 strategy=strategy, stop_underlying=stop_underlying,
                 target_underlying=target_underlying,
+                planned_risk=planned_risk, spread_at_entry=spread_at_entry,
             )
             self.risk.record_open()
             return
@@ -555,6 +601,7 @@ class TradingEngine:
                 contract.symbol, underlying, direction.value, qty, premium, order_id,
                 strategy=strategy, stop_underlying=stop_underlying,
                 target_underlying=target_underlying,
+                planned_risk=planned_risk, spread_at_entry=spread_at_entry,
             )
             self.risk.record_open()
 

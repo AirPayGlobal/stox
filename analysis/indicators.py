@@ -36,6 +36,31 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / period, adjust=False).mean()
 
 
+def relative_volume(today_vols: pd.Series, prior_day_vols: list[pd.Series]) -> float | None:
+    """
+    RVOL vs the same time of day: today's cumulative volume so far divided by
+    the average cumulative volume over the same number of bars on prior days.
+    Returns None when there is no usable history.
+    """
+    n = len(today_vols)
+    if n == 0 or not prior_day_vols:
+        return None
+    priors = [float(v.iloc[:n].sum()) for v in prior_day_vols if len(v) >= n]
+    if not priors:
+        return None
+    baseline = sum(priors) / len(priors)
+    if baseline <= 0:
+        return None
+    return float(today_vols.sum()) / baseline
+
+
+def daily_atr_from_daily_bars(daily_df: pd.DataFrame, period: int = 14) -> float | None:
+    """ATR over completed daily bars (caller must exclude today's partial bar)."""
+    if len(daily_df) < period + 1:
+        return None
+    return float(atr(daily_df, period).iloc[-1])
+
+
 def opening_range(df: pd.DataFrame, minutes: int) -> tuple[float, float]:
     """
     (high, low) of the first `minutes` of the session. `df` must contain a

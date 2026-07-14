@@ -34,8 +34,10 @@ class Config:
     ALPACA_MODE: str = os.getenv("ALPACA_MODE", "paper")  # "paper" | "live"
 
     # ------------------------------------------------------------ Universe
-    # Highly liquid underlyings with daily/near-dated option expiries.
-    UNDERLYINGS: list = _list("UNDERLYINGS", "SPY,QQQ")
+    # Production is isolated to the demonstrated edge (SPY ORB). QQQ and the
+    # sweep strategy remain available via env override and in the backtester,
+    # but must prove positive expectancy independently before rejoining.
+    UNDERLYINGS: list = _list("UNDERLYINGS", "SPY")
 
     # ------------------------------------------------------------ Daily governor
     # Hitting the profit target does NOT stop trading — it arms profit
@@ -43,7 +45,7 @@ class Config:
     # day's peak. Only if P&L falls back to the floor does the engine bank
     # the day (flatten + stop). The loss side is a hard halt.
     DAILY_PROFIT_TARGET: float = _f("DAILY_PROFIT_TARGET", 5000.0)
-    DAILY_MAX_LOSS: float = _f("DAILY_MAX_LOSS", 2500.0)
+    DAILY_MAX_LOSS: float = _f("DAILY_MAX_LOSS", 1500.0)
     # Floor = max(target * PROFIT_FLOOR_PCT, peak * (1 - PROFIT_GIVEBACK_PCT))
     PROFIT_FLOOR_PCT: float = _f("PROFIT_FLOOR_PCT", 0.70)      # keep >= 70% of target
     PROFIT_GIVEBACK_PCT: float = _f("PROFIT_GIVEBACK_PCT", 0.30)  # give back <= 30% of peak
@@ -62,7 +64,7 @@ class Config:
     # old stock bot used STOP_LOSS_PCT/TAKE_PROFIT_PCT/MAX_POSITION_PCT with
     # stock-scale values (2%/6%), and stale copies of those variables in
     # hosting dashboards silently strangled option exits.
-    RISK_PER_TRADE_PCT: float = _f("RISK_PER_TRADE_PCT", 0.01)
+    RISK_PER_TRADE_PCT: float = _f("RISK_PER_TRADE_PCT", 0.005)
     MAX_POSITION_PCT: float = _f("MAX_PREMIUM_PCT", 0.10)    # max premium outlay / equity
     MAX_CONTRACTS: int = _i("MAX_CONTRACTS", 50)
 
@@ -90,11 +92,24 @@ class Config:
 
     # ------------------------------------------------------------ Signals
     # STRATEGY: "orb" (opening-range momentum), "sweep" (liquidity-sweep
-    # reversal), or "both".
-    STRATEGY: str = os.getenv("STRATEGY", "both").lower()
+    # reversal), or "both". Default is orb-only: live results (PF 2.22 vs
+    # 0.99) put sweep on the bench until it re-qualifies.
+    STRATEGY: str = os.getenv("STRATEGY", "orb").lower()
     BAR_MINUTES: int = _i("BAR_MINUTES", 5)
     OPENING_RANGE_MINUTES: int = _i("OPENING_RANGE_MINUTES", 15)
     SIGNAL_THRESHOLD: int = _i("SIGNAL_THRESHOLD", 70)       # score 0-100
+
+    # ------------------------------------------------------------ ORB entry filters
+    # Each independently toggleable so it can be tested in isolation
+    # (backtest Phase 2) before combining. Missing data (no history for
+    # RVOL/ATR) skips the filter rather than blocking trading.
+    ORB_FILTER_VWAP: bool = _b("ORB_FILTER_VWAP", True)      # price & slope aligned
+    ORB_FILTER_RVOL: bool = _b("ORB_FILTER_RVOL", True)
+    RVOL_MIN: float = _f("RVOL_MIN", 1.3)
+    RVOL_LOOKBACK_DAYS: int = _i("RVOL_LOOKBACK_DAYS", 10)
+    ORB_FILTER_OR_ATR: bool = _b("ORB_FILTER_OR_ATR", True)  # OR size vs daily ATR
+    OR_ATR_MIN: float = _f("OR_ATR_MIN", 0.30)
+    OR_ATR_MAX: float = _f("OR_ATR_MAX", 1.00)
 
     # ------------------------------------------------------------ Sweep strategy
     SWEEP_TIMEFRAME_MINUTES: int = _i("SWEEP_TIMEFRAME_MINUTES", 60)
