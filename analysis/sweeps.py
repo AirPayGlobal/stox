@@ -27,6 +27,7 @@ from dataclasses import dataclass
 import pandas as pd
 
 from analysis.signals import Signal
+from config import Config
 
 
 @dataclass
@@ -180,6 +181,22 @@ def session_range(
     if seg.empty:
         return None
     return float(seg["high"].max()), float(seg["low"].min())
+
+
+def stop_distance_ok(spot: float, stop: float) -> bool:
+    """
+    Tradeable stop-distance band for intraday sweep setups:
+      * too tight (< SWEEP_MIN_STOP_PCT of spot, floored at $0.01) — noise
+        collects the stop and risk-based sizing balloons
+      * too wide (> SWEEP_MAX_STOP_PCT) — a swing-sized wick whose 2R target
+        is unreachable intraday
+    """
+    dist = abs(spot - stop)
+    return (
+        max(0.01, spot * Config.SWEEP_MIN_STOP_PCT)
+        <= dist
+        <= spot * Config.SWEEP_MAX_STOP_PCT
+    )
 
 
 def rr_target(entry: float, stop: float, rr: float) -> float:

@@ -12,8 +12,10 @@ from analysis.sweeps import (
     prev_day_level_sweep,
     rr_target,
     session_range,
+    stop_distance_ok,
     sweep_reclaim,
 )
+from config import Config
 
 ET = ZoneInfo("America/New_York")
 
@@ -194,6 +196,18 @@ def test_no_fvg_in_tight_range():
 def test_rr_target_long_and_short():
     assert rr_target(entry=100.0, stop=99.0, rr=2.0) == 102.0
     assert rr_target(entry=100.0, stop=101.0, rr=2.0) == 98.0
+
+
+def test_stop_distance_band():
+    spot = 700.0
+    # defaults: min 0.15% (1.05), max 1.0% (7.00)
+    assert not stop_distance_ok(spot, spot - 0.50)    # too tight — noise
+    assert stop_distance_ok(spot, spot - 2.00)        # tradeable
+    assert stop_distance_ok(spot, spot + 5.00)        # tradeable (short side)
+    assert not stop_distance_ok(spot, spot - 11.48)   # swing-sized wick — skip
+    # boundaries
+    assert stop_distance_ok(spot, spot - spot * Config.SWEEP_MAX_STOP_PCT)
+    assert not stop_distance_ok(spot, spot - spot * Config.SWEEP_MAX_STOP_PCT * 1.01)
 
 
 def test_resample_aligns_to_0930():

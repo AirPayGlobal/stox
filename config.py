@@ -74,6 +74,9 @@ class Config:
     # ------------------------------------------------------------ Loss discipline
     # After a losing close on an underlying, no re-entry for this long...
     LOSS_COOLDOWN_MINUTES: int = _i("LOSS_COOLDOWN_MINUTES", 30)
+    # ...and after a WINNING close, a shorter pause — instant re-entry
+    # after a take-profit chases an extended move at a worse price.
+    WIN_COOLDOWN_MINUTES: int = _i("WIN_COOLDOWN_MINUTES", 10)
     # ...and after this many consecutive losers on one underlying, it is
     # done for the day.
     MAX_CONSECUTIVE_LOSSES: int = _i("MAX_CONSECUTIVE_LOSSES", 3)
@@ -120,6 +123,10 @@ class Config:
     # near-zero stop distance lets "1% risk" sizing balloon to the outlay cap,
     # and slippage makes the theoretical risk fictional (backtest artifact #2).
     SWEEP_MIN_STOP_PCT: float = _f("SWEEP_MIN_STOP_PCT", 0.0015)
+    # ...and skip setups whose stop is FURTHER than this fraction of spot:
+    # a wide HTF wick means a swing-sized stop and a 2R target that is
+    # unreachable intraday (live data: -$2k trades chasing +3% targets).
+    SWEEP_MAX_STOP_PCT: float = _f("SWEEP_MAX_STOP_PCT", 0.010)
 
     # ------------------------------------------------------------ Session (ET)
     ENTRY_START: str = os.getenv("ENTRY_START", "09:45")     # no entries before

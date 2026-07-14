@@ -191,13 +191,14 @@ class RiskManager:
     ) -> int:
         """
         Sizing for trades whose stop is an UNDERLYING price level: expected
-        option loss at the stop ~= |delta| * stop_distance per share. Falls
-        back to premium-based sizing when delta is unavailable.
+        option loss at the stop ~= |delta| * stop_distance per share. When
+        the feed returns no greeks, assume ATM delta (0.5) — the premium-based
+        fallback ignored the stop distance and oversized wide-stop trades.
         """
         if premium <= 0 or equity <= 0 or stop_distance <= 0:
             return 0
         if delta is None:
-            return self.contracts_for(equity, premium)
+            delta = 0.5
 
         risk_per_contract = min(abs(delta) * stop_distance, premium) * 100
         if risk_per_contract <= 0:

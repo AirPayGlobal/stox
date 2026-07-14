@@ -117,6 +117,19 @@ def test_sizing_zero_when_unaffordable():
     assert rm.contracts_for(equity=100_000, premium=0.0) == 0
 
 
+def test_underlying_stop_sizing_without_greeks_respects_stop_distance():
+    # Regression: with delta=None the old fallback ignored the stop distance
+    # and sized a wide-stop trade to 8 contracts (real loss -$2,032). The ATM
+    # assumption keeps risk tied to the actual stop.
+    rm = make_rm()
+    equity, premium, stop_distance = 100_000, 4.25, 11.48
+    qty = rm.contracts_for_underlying_stop(equity, premium, None, stop_distance)
+    # risk/contract = min(0.5 * 11.48, 4.25) * 100 = $425 -> 1% of equity // 425 = 2
+    assert qty == 2
+    # With greeks present the math is identical for delta 0.5.
+    assert qty == rm.contracts_for_underlying_stop(equity, premium, 0.5, stop_distance)
+
+
 def test_reset_clears_locks():
     rm = make_rm()
     rm.state.protect_locked = True
