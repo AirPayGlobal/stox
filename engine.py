@@ -90,6 +90,12 @@ class TradingEngine:
     def run(self) -> None:
         self.running = True
         logger.info("Engine loop started")
+        # Seed account equity immediately so the dashboard doesn't show $0
+        # until the first market-hours tick.
+        try:
+            self.last_equity = get_account()["equity"]
+        except Exception as exc:
+            logger.error(f"Initial account fetch failed: {exc}")
         if not self.dry_run:
             try:
                 self.reconcile_with_broker()
