@@ -59,7 +59,7 @@ def test_engine_entry_blocked_by_streak_and_cooldown(tmp_path, monkeypatch):
 
     # One recent loss: cooldown blocks
     close_trade(e.book, "SPY", -1)
-    assert "cooldown" in e._entry_blocked("SPY")
+    assert "loss cooldown" in e._entry_blocked("SPY")
 
     # Loss older than the cooldown: allowed again
     close_trade(e.book, "QQQ", -1, minutes_ago=45)
@@ -69,3 +69,19 @@ def test_engine_entry_blocked_by_streak_and_cooldown(tmp_path, monkeypatch):
     for _ in range(3):
         close_trade(e.book, "IWM", -1, minutes_ago=60)
     assert "consecutive" in e._entry_blocked("IWM")
+
+
+def test_win_cooldown_blocks_instant_reentry(tmp_path, monkeypatch):
+    import engine as eng
+
+    monkeypatch.setattr(Config, "WIN_COOLDOWN_MINUTES", 10)
+    e = eng.TradingEngine(dry_run=True)
+    e.book = make_book(tmp_path)
+
+    # A take-profit seconds ago: short win-cooldown blocks the re-entry.
+    close_trade(e.book, "SPY", +1)
+    assert "win cooldown" in e._entry_blocked("SPY")
+
+    # A win older than the win-cooldown: trading again.
+    close_trade(e.book, "QQQ", +1, minutes_ago=15)
+    assert e._entry_blocked("QQQ") is None

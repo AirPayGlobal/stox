@@ -139,6 +139,14 @@ class PositionBook:
                 break
         return streak
 
+    def last_close_time(self, underlying: str) -> tuple[datetime, float] | None:
+        """(close time, pnl) of the most recent closed trade on `underlying`
+        today, or None."""
+        for trade in reversed(self.closed_today()):
+            if trade.underlying == underlying:
+                return datetime.fromisoformat(trade.closed_at), trade.pnl
+        return None
+
     def last_loss_time(self, underlying: str) -> datetime | None:
         """Close time of the most recent trade on `underlying` today, if it
         was a loss (a winning close resets the cooldown)."""

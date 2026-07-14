@@ -35,6 +35,7 @@ from analysis.sweeps import (
     prev_day_level_sweep,
     rr_target,
     session_range,
+    stop_distance_ok,
     sweep_reclaim,
 )
 
@@ -124,7 +125,7 @@ def _close_synthetic(trade, spot, ts, iv, reason):
 
 
 def _loss_discipline_blocked(trades: list[dict], ts) -> bool:
-    """Engine parity: post-loss cooldown + consecutive-loss cutoff."""
+    """Engine parity: consecutive-loss cutoff + post-loss/post-win cooldowns."""
     streak = 0
     for t in reversed(trades):
         if t["pnl"] < 0:
@@ -133,9 +134,13 @@ def _loss_discipline_blocked(trades: list[dict], ts) -> bool:
             break
     if streak >= Config.MAX_CONSECUTIVE_LOSSES:
         return True
-    if trades and trades[-1]["pnl"] < 0:
-        minutes = (ts - trades[-1]["closed_ts"]).total_seconds() / 60
-        if minutes < Config.LOSS_COOLDOWN_MINUTES:
+    if trades:
+        last = trades[-1]
+        cooldown = (
+            Config.LOSS_COOLDOWN_MINUTES if last["pnl"] < 0 else Config.WIN_COOLDOWN_MINUTES
+        )
+        minutes = (ts - last["closed_ts"]).total_seconds() / 60
+        if minutes < cooldown:
             return True
     return False
 
@@ -253,7 +258,7 @@ def simulate_day_sweep(
         acted.add(dedupe)
 
         stop = sig.extreme
-        if abs(spot - stop) < max(0.01, spot * Config.SWEEP_MIN_STOP_PCT):
+        if not stop_distance_ok(spot, stop):
             continue
         target = rr_target(spot, stop, Config.SWEEP_RR)
         open_trade = _open_synthetic(

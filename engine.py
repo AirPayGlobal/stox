@@ -35,6 +35,7 @@ from analysis.sweeps import (
     prev_day_level_sweep,
     rr_target,
     session_range,
+    stop_distance_ok,
     sweep_reclaim,
 )
 from config import Config
@@ -293,18 +294,22 @@ class TradingEngine:
                 self._scan_sweep(underlying, equity)
 
     def _entry_blocked(self, underlying: str) -> str | None:
-        """Loss discipline: cooldown after a stop-out, and a hard per-day
-        cutoff after consecutive losers on the same underlying."""
+        """Re-entry discipline: hard per-day cutoff after consecutive losers,
+        a cooldown after losses, and a shorter cooldown after wins (instant
+        re-entry after a take-profit chases an extended move)."""
         streak = self.book.consecutive_losses(underlying)
         if streak >= Config.MAX_CONSECUTIVE_LOSSES:
             return f"{streak} consecutive losses — done with {underlying} today"
-        last_loss = self.book.last_loss_time(underlying)
-        if last_loss is not None:
-            elapsed = (datetime.now(ET) - last_loss).total_seconds() / 60
-            if elapsed < Config.LOSS_COOLDOWN_MINUTES:
-                return (
-                    f"loss cooldown ({elapsed:.0f}/{Config.LOSS_COOLDOWN_MINUTES} min)"
-                )
+        last = self.book.last_close_time(underlying)
+        if last is not None:
+            closed_at, pnl = last
+            elapsed = (datetime.now(ET) - closed_at).total_seconds() / 60
+            cooldown = (
+                Config.LOSS_COOLDOWN_MINUTES if pnl < 0 else Config.WIN_COOLDOWN_MINUTES
+            )
+            if elapsed < cooldown:
+                kind = "loss" if pnl < 0 else "win"
+                return f"{kind} cooldown ({elapsed:.0f}/{cooldown} min)"
         return None
 
     # ------------------------------------------------------------ ORB momentum
@@ -376,10 +381,11 @@ class TradingEngine:
         if blocked:
             logger.info(f"{underlying} sweep entry blocked: {blocked}")
             return
-        if abs(spot - sig.extreme) < spot * Config.SWEEP_MIN_STOP_PCT:
+        if not stop_distance_ok(spot, sig.extreme):
             logger.info(
-                f"{underlying} sweep skipped: stop too tight "
-                f"({abs(spot - sig.extreme):.2f} < {spot * Config.SWEEP_MIN_STOP_PCT:.2f})"
+                f"{underlying} sweep skipped: stop distance "
+                f"{abs(spot - sig.extreme):.2f} outside tradeable band "
+                f"({sig.kind}, spot {spot:.2f})"
             )
             return
         self._acted_sweeps.add(dedupe)
