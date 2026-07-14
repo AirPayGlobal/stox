@@ -117,10 +117,11 @@ def test_sizing_zero_when_unaffordable():
     assert rm.contracts_for(equity=100_000, premium=0.0) == 0
 
 
-def test_underlying_stop_sizing_without_greeks_respects_stop_distance():
+def test_underlying_stop_sizing_without_greeks_respects_stop_distance(monkeypatch):
     # Regression: with delta=None the old fallback ignored the stop distance
     # and sized a wide-stop trade to 8 contracts (real loss -$2,032). The ATM
     # assumption keeps risk tied to the actual stop.
+    monkeypatch.setattr(Config, "RISK_PER_TRADE_PCT", 0.01)
     rm = make_rm()
     equity, premium, stop_distance = 100_000, 4.25, 11.48
     qty = rm.contracts_for_underlying_stop(equity, premium, None, stop_distance)

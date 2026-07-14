@@ -20,11 +20,13 @@ def _bucket_stats(trades: list[Trade]) -> dict:
     losses = [t for t in trades if t.pnl < 0]
     gross_win = sum(t.pnl for t in wins)
     gross_loss = -sum(t.pnl for t in losses)
-    return {
+    rs = sorted(t.realized_r for t in trades if t.planned_risk > 0)
+    out = {
         "trades": len(trades),
         "wins": len(wins),
         "win_rate": round(len(wins) / len(trades), 3) if trades else 0.0,
         "pnl": round(sum(t.pnl for t in trades), 2),
+        "expectancy": round(sum(t.pnl for t in trades) / len(trades), 2) if trades else 0.0,
         "avg_win": round(gross_win / len(wins), 2) if wins else 0.0,
         "avg_loss": round(-gross_loss / len(losses), 2) if losses else 0.0,
         "largest_win": round(max((t.pnl for t in wins), default=0.0), 2),
@@ -33,6 +35,22 @@ def _bucket_stats(trades: list[Trade]) -> dict:
             round(gross_win / gross_loss, 2) if gross_loss > 0
             else (None if not wins else float("inf"))
         ),
+    }
+    if rs:
+        out["avg_r"] = round(sum(rs) / len(rs), 2)
+        out["median_r"] = round(rs[len(rs) // 2], 2)
+    return out
+
+
+def _concentration(trades: list[Trade]) -> dict:
+    """How dependent is the profit on a few outliers?"""
+    win_pnls = sorted((t.pnl for t in trades if t.pnl > 0), reverse=True)
+    gross_profit = sum(win_pnls)
+    if gross_profit <= 0:
+        return {"largest_win_pct_of_profit": None, "top5_wins_pct_of_profit": None}
+    return {
+        "largest_win_pct_of_profit": round(win_pnls[0] / gross_profit, 3),
+        "top5_wins_pct_of_profit": round(sum(win_pnls[:5]) / gross_profit, 3),
     }
 
 
@@ -102,9 +120,11 @@ def period_report(book: PositionBook, days: int = 30) -> dict:
         "worst_day": round(min(daily_pnls), 2),
         "avg_day": round(sum(daily_pnls) / len(daily_pnls), 2),
         "max_drawdown": round(max_drawdown, 2),
+        "concentration": _concentration(trades),
         "daily": daily_rows,
         "per_strategy": group(lambda t: t.strategy or "orb"),
         "per_underlying": group(lambda t: t.underlying),
+        "per_hour": group(lambda t: t.opened_at[11:13] + ":00"),
         "exit_reasons": dict(exit_reasons),
     }
 
@@ -144,6 +164,7 @@ CSV_FIELDS = [
     "closed_at", "opened_at", "symbol", "underlying", "strategy", "direction",
     "qty", "entry_premium", "exit_premium", "stop_premium", "target_premium",
     "stop_underlying", "target_underlying", "status", "pnl",
+    "planned_risk", "realized_r", "mfe_premium", "mae_premium", "spread_at_entry",
 ]
 
 

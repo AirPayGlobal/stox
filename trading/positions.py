@@ -37,6 +37,11 @@ class Trade:
     strategy: str = "orb"        # "orb" | "sweep"
     stop_underlying: float = 0.0    # 0 = premium-based exits only
     target_underlying: float = 0.0
+    planned_risk: float = 0.0       # $ expected loss at the stop, at entry
+    realized_r: float = 0.0         # pnl / planned_risk, set at close
+    spread_at_entry: float = 0.0    # contract ask - bid at entry
+    mfe_premium: float = 0.0        # best mark seen while open
+    mae_premium: float = 0.0        # worst mark seen while open
 
     def unrealized(self, mark: float) -> float:
         return (mark - self.entry_premium) * 100 * self.qty
@@ -70,6 +75,8 @@ class PositionBook:
         strategy: str = "orb",
         stop_underlying: float = 0.0,
         target_underlying: float = 0.0,
+        planned_risk: float = 0.0,
+        spread_at_entry: float = 0.0,
     ) -> Trade:
         if strategy == "sweep":
             # Exits are driven by underlying levels; the premium stop is only
@@ -92,6 +99,13 @@ class PositionBook:
             strategy=strategy,
             stop_underlying=round(stop_underlying, 2),
             target_underlying=round(target_underlying, 2),
+            planned_risk=round(
+                planned_risk if planned_risk
+                else entry_premium * Config.STOP_LOSS_PCT * 100 * qty, 2
+            ),
+            spread_at_entry=round(spread_at_entry, 2),
+            mfe_premium=entry_premium,
+            mae_premium=entry_premium,
         )
         self.book.open_trades.append(trade)
         self._save()
@@ -108,6 +122,10 @@ class PositionBook:
                 trade.closed_at = datetime.now(ET).isoformat()
                 trade.status = status
                 trade.pnl = round((exit_premium - trade.entry_premium) * 100 * trade.qty, 2)
+                if trade.planned_risk > 0:
+                    trade.realized_r = round(trade.pnl / trade.planned_risk, 2)
+                trade.mfe_premium = round(max(trade.mfe_premium, exit_premium), 2)
+                trade.mae_premium = round(min(trade.mae_premium, exit_premium), 2)
                 self.book.open_trades.remove(trade)
                 self.book.closed_trades.append(trade)
                 self._save()

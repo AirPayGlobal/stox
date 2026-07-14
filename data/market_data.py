@@ -83,6 +83,28 @@ def get_today_bars(symbol: str, minutes: int | None = None) -> pd.DataFrame:
     return df[df.index.date == today]
 
 
+def get_daily_bars(symbol: str, days: int = 30) -> pd.DataFrame:
+    """Completed DAILY bars (today's partial bar excluded) for ATR context."""
+    from alpaca.data.requests import StockBarsRequest
+    from alpaca.data.timeframe import TimeFrame
+
+    start = datetime.now(timezone.utc) - timedelta(days=days + 10)
+    req = StockBarsRequest(symbol_or_symbols=symbol, timeframe=TimeFrame.Day, start=start)
+    try:
+        df = _client().get_stock_bars(req).df
+    except Exception as exc:
+        logger.error(f"Daily bar fetch failed for {symbol}: {exc}")
+        return pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame()
+    if isinstance(df.index, pd.MultiIndex):
+        df = df.xs(symbol, level="symbol")
+    df = df.tz_convert(ET)
+    today = datetime.now(ET).date()
+    df = df[df.index.date < today]
+    return df[["open", "high", "low", "close", "volume"]]
+
+
 def get_latest_price(symbol: str) -> float | None:
     from alpaca.data.requests import StockLatestTradeRequest
 

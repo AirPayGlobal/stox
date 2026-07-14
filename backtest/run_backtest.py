@@ -28,7 +28,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import pandas as pd
 
 from analysis.htf import completed_bars, resample_bars
-from analysis.signals import Signal, generate_signal
+from analysis.indicators import atr as atr_indicator
+from analysis.indicators import relative_volume
+from analysis.signals import Signal, SignalContext, generate_signal
 from analysis.sweeps import (
     level_sweep,
     overnight_range,
@@ -145,8 +147,15 @@ def _loss_discipline_blocked(trades: list[dict], ts) -> bool:
     return False
 
 
-def simulate_day_orb(symbol: str, day_bars: pd.DataFrame, equity: float) -> list[dict]:
-    """Opening-range momentum: premium-based exits (engine parity)."""
+def simulate_day_orb(
+    symbol: str,
+    day_bars: pd.DataFrame,
+    equity: float,
+    daily_atr: float | None = None,
+    prior_vols: list[pd.Series] | None = None,
+) -> list[dict]:
+    """Opening-range momentum: premium-based exits (engine parity, including
+    the VWAP/RVOL/OR-quality entry filters)."""
     trades: list[dict] = []
     open_trade: dict | None = None
     iv = realized_iv(day_bars)
@@ -182,7 +191,11 @@ def simulate_day_orb(symbol: str, day_bars: pd.DataFrame, equity: float) -> list
             continue
         if _loss_discipline_blocked(trades, ts):
             continue
-        result = generate_signal(window)
+        ctx = SignalContext(
+            daily_atr=daily_atr,
+            rvol=relative_volume(window["volume"], prior_vols or []),
+        )
+        result = generate_signal(window, ctx)
         if result.signal == Signal.FLAT:
             continue
         open_trade = _open_synthetic(symbol, ts, result.signal, spot, iv, equity)
@@ -313,10 +326,29 @@ def run_backtest(symbols: list[str], days: int, equity: float, strategy: str) ->
             if not bars_ext.empty:
                 bars = bars_ext.between_time("09:30", "16:00")
                 day_groups = [(d, g) for d, g in bars.groupby(bars.index.date)]
+                # Daily ATR series (prior completed days only, per day).
+                daily_ohlc = pd.DataFrame(
+                    {
+                        "high": [g["high"].max() for _, g in day_groups],
+                        "low": [g["low"].min() for _, g in day_groups],
+                        "close": [g["close"].iloc[-1] for _, g in day_groups],
+                    },
+                    index=[d for d, _ in day_groups],
+                )
+                daily_atr_prior = atr_indicator(daily_ohlc, 14).shift(1)
                 for idx, (day, day_bars) in enumerate(day_groups):
                     prev_bars = day_groups[idx - 1][1] if idx > 0 else None
                     if "orb" in strategies:
-                        by_strategy["orb"] += simulate_day_orb(symbol, day_bars, equity)
+                        d_atr = daily_atr_prior.loc[day]
+                        d_atr = float(d_atr) if pd.notna(d_atr) and idx >= 14 else None
+                        prior_vols = [
+                            g["volume"] for _, g in
+                            day_groups[max(0, idx - Config.RVOL_LOOKBACK_DAYS): idx]
+                        ]
+                        by_strategy["orb"] += simulate_day_orb(
+                            symbol, day_bars, equity,
+                            daily_atr=d_atr, prior_vols=prior_vols,
+                        )
                     if "sweep" in strategies:
                         onr = _range_levels(bars_ext, day)
                         by_strategy["sweep"] += simulate_day_sweep(
