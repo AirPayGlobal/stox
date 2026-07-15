@@ -64,7 +64,8 @@
 
 <h2>Signals</h2>
 <table id="sig-table"><thead><tr>
-  <th>Underlying</th><th>Signal</th><th>Score</th><th>Price</th><th>VWAP</th><th>RSI</th><th>As of</th>
+  <th>Underlying</th><th>Signal</th><th>Score</th><th>Price</th><th>VWAP</th><th>RSI</th>
+  <th>RVOL</th><th>Blocked by</th><th>As of</th>
 </tr></thead><tbody></tbody></table>
 
 <h2>Closed today</h2>
@@ -182,10 +183,14 @@ async function refresh() {
 
   document.querySelector("#sig-table tbody").innerHTML =
     Object.entries(s.signals || {}).map(([u, g]) => `<tr>
-      <td>${u}</td><td>${g.signal}</td><td>${g.score}</td>
-      <td>$${fmt(g.price)}</td><td>$${fmt(g.vwap)}</td><td>${fmt(g.rsi,1)}</td>
+      <td>${u}</td><td>${g.signal}</td><td>${g.score ?? "—"}</td>
+      <td>${g.price ? "$"+fmt(g.price) : "—"}</td>
+      <td>${g.vwap ? "$"+fmt(g.vwap) : "—"}</td>
+      <td>${g.rsi != null ? fmt(g.rsi,1) : "—"}</td>
+      <td>${g.rvol != null ? fmt(g.rvol,2) : "—"}</td>
+      <td class="warn">${g.filtered || (g.signal === "FLAT" ? "no setup" : "—")}</td>
       <td>${(g.at || "").slice(11,19)}</td></tr>`).join("")
-    || `<tr><td colspan="7" style="color:#8b949e">no scans yet</td></tr>`;
+    || `<tr><td colspan="9" style="color:#8b949e">no scans yet</td></tr>`;
 
   let trades = [];
   try { trades = await (await fetch("/api/trades")).json(); } catch {}
