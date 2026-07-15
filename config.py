@@ -110,6 +110,13 @@ class Config:
     ORB_FILTER_OR_ATR: bool = _b("ORB_FILTER_OR_ATR", True)  # OR size vs daily ATR
     OR_ATR_MIN: float = _f("OR_ATR_MIN", 0.30)
     OR_ATR_MAX: float = _f("OR_ATR_MAX", 1.00)
+    # Breakout-candle volume confirmation: the bar that breaks the opening
+    # range must trade on volume >= BREAK_VOLUME_MULT x the prior N bars'
+    # average — "institutional footprints", weak-volume breaks fail more.
+    # Default OFF: test it against the live baseline before enabling.
+    ORB_FILTER_BREAK_VOLUME: bool = _b("ORB_FILTER_BREAK_VOLUME", False)
+    BREAK_VOLUME_MULT: float = _f("BREAK_VOLUME_MULT", 1.2)
+    BREAK_VOLUME_LOOKBACK: int = _i("BREAK_VOLUME_LOOKBACK", 10)
 
     # ------------------------------------------------------------ Sweep strategy
     SWEEP_TIMEFRAME_MINUTES: int = _i("SWEEP_TIMEFRAME_MINUTES", 60)

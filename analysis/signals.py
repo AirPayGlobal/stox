@@ -58,6 +58,7 @@ def _filter_reason(
     vwap_slope: float,
     or_size: float,
     ctx: SignalContext | None,
+    break_vol_ratio: float | None = None,
 ) -> str | None:
     """First failed filter, or None if the setup passes all enabled filters."""
     if Config.ORB_FILTER_VWAP:
@@ -74,6 +75,9 @@ def _filter_reason(
         ratio = or_size / ctx.daily_atr
         if not (Config.OR_ATR_MIN <= ratio <= Config.OR_ATR_MAX):
             return f"or/atr {ratio:.2f} outside [{Config.OR_ATR_MIN}, {Config.OR_ATR_MAX}]"
+    if Config.ORB_FILTER_BREAK_VOLUME and break_vol_ratio is not None:
+        if break_vol_ratio < Config.BREAK_VOLUME_MULT:
+            return f"break volume {break_vol_ratio:.2f}x < {Config.BREAK_VOLUME_MULT}x"
     return None
 
 
@@ -144,8 +148,16 @@ def generate_signal(
         direction = Signal.SHORT
 
     if direction != Signal.FLAT:
+        break_vol_ratio = None
+        vols = session_df["volume"]
+        lb = Config.BREAK_VOLUME_LOOKBACK
+        if len(vols) >= lb + 1:
+            prior_avg = float(vols.iloc[-(lb + 1):-1].mean())
+            if prior_avg > 0:
+                break_vol_ratio = float(vols.iloc[-1]) / prior_avg
+                details["break_vol"] = round(break_vol_ratio, 2)
         reason = _filter_reason(
-            direction, price, vwap, vwap_slope, or_high - or_low, ctx
+            direction, price, vwap, vwap_slope, or_high - or_low, ctx, break_vol_ratio
         )
         if reason:
             details["filtered"] = reason
