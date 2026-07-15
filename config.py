@@ -100,14 +100,17 @@ class Config:
     SIGNAL_THRESHOLD: int = _i("SIGNAL_THRESHOLD", 70)       # score 0-100
 
     # ------------------------------------------------------------ ORB entry filters
-    # Each independently toggleable so it can be tested in isolation
-    # (backtest Phase 2) before combining. Missing data (no history for
-    # RVOL/ATR) skips the filter rather than blocking trading.
-    ORB_FILTER_VWAP: bool = _b("ORB_FILTER_VWAP", True)      # price & slope aligned
-    ORB_FILTER_RVOL: bool = _b("ORB_FILTER_RVOL", True)
+    # ALL DEFAULT OFF: these are unvalidated against the live track record,
+    # which was produced by the unfiltered ORB logic. Test each in isolation
+    # in the backtester (Phase 2) and enable via env only if it improves
+    # expectancy. Missing data (no RVOL/ATR history) skips the filter rather
+    # than blocking trading. NOTE: RVOL_MIN=1.3 suits in-play single stocks;
+    # an index ETF hovers near 1.0x, so calibrate before enabling on SPY.
+    ORB_FILTER_VWAP: bool = _b("ORB_FILTER_VWAP", False)     # price & slope aligned
+    ORB_FILTER_RVOL: bool = _b("ORB_FILTER_RVOL", False)
     RVOL_MIN: float = _f("RVOL_MIN", 1.3)
     RVOL_LOOKBACK_DAYS: int = _i("RVOL_LOOKBACK_DAYS", 10)
-    ORB_FILTER_OR_ATR: bool = _b("ORB_FILTER_OR_ATR", True)  # OR size vs daily ATR
+    ORB_FILTER_OR_ATR: bool = _b("ORB_FILTER_OR_ATR", False)  # OR size vs daily ATR
     OR_ATR_MIN: float = _f("OR_ATR_MIN", 0.30)
     OR_ATR_MAX: float = _f("OR_ATR_MAX", 1.00)
     # Breakout-candle volume confirmation: the bar that breaks the opening
