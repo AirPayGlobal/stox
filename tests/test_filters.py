@@ -85,6 +85,31 @@ def test_filters_can_be_disabled(monkeypatch):
     assert generate_signal(make_session(UP), ctx).signal == Signal.LONG
 
 
+def test_break_volume_filter_blocks_weak_breakout(monkeypatch):
+    monkeypatch.setattr(Config, "ORB_FILTER_BREAK_VOLUME", True)
+    monkeypatch.setattr(Config, "BREAK_VOLUME_MULT", 1.2)
+    monkeypatch.setattr(Config, "BREAK_VOLUME_LOOKBACK", 10)
+    # Flat volume everywhere -> breakout bar is 1.0x prior avg -> blocked.
+    result = generate_signal(make_session(UP, volume=10_000))
+    assert result.signal == Signal.FLAT
+    assert "break volume" in result.details["filtered"]
+
+
+def test_break_volume_filter_passes_volume_expansion(monkeypatch):
+    monkeypatch.setattr(Config, "ORB_FILTER_BREAK_VOLUME", True)
+    monkeypatch.setattr(Config, "BREAK_VOLUME_MULT", 1.2)
+    monkeypatch.setattr(Config, "BREAK_VOLUME_LOOKBACK", 10)
+    df = make_session(UP, volume=10_000)
+    df.iloc[-1, df.columns.get_loc("volume")] = 30_000  # 3x expansion on the break
+    assert generate_signal(df).signal == Signal.LONG
+
+
+def test_break_volume_filter_off_by_default():
+    # Default config: filter disabled, flat volume still trades.
+    assert Config.ORB_FILTER_BREAK_VOLUME is False
+    assert generate_signal(make_session(UP, volume=10_000)).signal == Signal.LONG
+
+
 def test_relative_volume_math():
     today = pd.Series([100, 100, 100])            # 300 so far
     prior = [pd.Series([50] * 13), pd.Series([150] * 13)]  # same-time avg = 300
