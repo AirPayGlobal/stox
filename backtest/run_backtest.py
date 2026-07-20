@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
+from analysis.exits import effective_stop, fixed_target_active
 from analysis.htf import completed_bars, resample_bars
 from analysis.indicators import atr as atr_indicator
 from analysis.indicators import relative_volume
@@ -111,6 +112,7 @@ def _open_synthetic(symbol, ts, direction, spot, iv, equity, stop_ul=None, targe
         "strike": strike,
         "qty": qty,
         "entry": entry,
+        "mfe": entry,
         "stop": entry * (1 - Config.STOP_LOSS_PCT),
         "target": entry * (1 + Config.TAKE_PROFIT_PCT),
         "stop_ul": stop_ul,
@@ -170,14 +172,16 @@ def simulate_day_orb(
             mark = bs_price(
                 spot, open_trade["strike"], t_to_expiry_years(ts), iv, open_trade["type"]
             )
+            open_trade["mfe"] = max(open_trade["mfe"], mark)
             minutes_open = (ts - open_trade["opened"]).total_seconds() / 60
+            eff_stop = effective_stop(open_trade["entry"], open_trade["stop"], open_trade["mfe"])
             reason = None
             if ts.time() >= flatten:
                 reason = "FLATTEN"
-            elif mark >= open_trade["target"]:
+            elif fixed_target_active() and mark >= open_trade["target"]:
                 reason = "TP"
-            elif mark <= open_trade["stop"]:
-                reason = "SL"
+            elif mark <= eff_stop:
+                reason = "TRAIL" if eff_stop > open_trade["stop"] else "SL"
             elif minutes_open >= Config.MAX_HOLD_MINUTES:
                 reason = "TIME"
             if reason:

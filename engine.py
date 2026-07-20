@@ -247,10 +247,14 @@ class TradingEngine:
         self._open_unrealized = unrealized
 
     def _premium_exit(self, trade, mark: float) -> str | None:
-        if mark >= trade.target_premium:
+        from analysis.exits import effective_stop, fixed_target_active
+
+        if fixed_target_active() and mark >= trade.target_premium:
             return "TP"
-        if mark <= trade.stop_premium:
-            return "SL"
+        eff_stop = effective_stop(trade.entry_premium, trade.stop_premium, trade.mfe_premium)
+        if mark <= eff_stop:
+            # Classify: gave back a profit (breakeven/trail) vs a straight stop.
+            return "TRAIL" if eff_stop > trade.stop_premium else "SL"
         if trade.minutes_open() >= Config.MAX_HOLD_MINUTES:
             return "TIME"
         if self._signal_reversed(trade):
