@@ -83,6 +83,18 @@ class Config:
     STOP_LOSS_PCT: float = _f("PREMIUM_STOP_PCT", 0.30)      # -30% on premium
     MAX_HOLD_MINUTES: int = _i("MAX_HOLD_MINUTES", 90)       # time stop
 
+    # ---- Exit management (Phase 4): let winners run, cut losers to scratch ----
+    # All default OFF (0). Backtest before enabling — these reshape the P&L
+    # distribution and must be validated, not assumed. Percentages are of the
+    # entry premium; the peak used is the trade's max favorable mark (MFE).
+    #   breakeven: once MFE reaches +BE_TRIGGER, raise the stop to entry
+    #   trailing:  once MFE reaches +TRAIL_TRIGGER, trail the stop TRAIL_PCT
+    #              below the peak; while trailing is enabled the fixed target
+    #              is removed so winners can run (the trail becomes the exit)
+    ORB_BREAKEVEN_TRIGGER_PCT: float = _f("ORB_BREAKEVEN_TRIGGER_PCT", 0.0)
+    ORB_TRAIL_TRIGGER_PCT: float = _f("ORB_TRAIL_TRIGGER_PCT", 0.0)
+    ORB_TRAIL_PCT: float = _f("ORB_TRAIL_PCT", 0.20)
+
     # ------------------------------------------------------------ Loss discipline
     # After a losing close on an underlying, no re-entry for this long...
     LOSS_COOLDOWN_MINUTES: int = _i("LOSS_COOLDOWN_MINUTES", 30)
