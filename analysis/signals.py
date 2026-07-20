@@ -166,5 +166,8 @@ def generate_signal(
                 long_score, short_score, price, details,
             )
         score = long_score if direction == Signal.LONG else short_score
+        if Config.INVERT_SIGNALS:
+            direction = Signal.SHORT if direction == Signal.LONG else Signal.LONG
+            details["inverted"] = True
         return SignalResult(direction, score, long_score, short_score, price, details)
     return SignalResult(Signal.FLAT, max(long_score, short_score), long_score, short_score, price, details)

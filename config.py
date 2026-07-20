@@ -105,6 +105,10 @@ class Config:
     # reversal), or "both". Default is orb-only: live results (PF 2.22 vs
     # 0.99) put sweep on the bench until it re-qualifies.
     STRATEGY: str = os.getenv("STRATEGY", "orb").lower()
+    # Diagnostic: flip every LONG<->SHORT signal. For TESTING whether the
+    # inverse has an edge (backtest it) — not a money button. Costs and exit
+    # asymmetry mean a losing strategy rarely inverts into a winning one.
+    INVERT_SIGNALS: bool = _b("INVERT_SIGNALS", False)
     BAR_MINUTES: int = _i("BAR_MINUTES", 5)
     OPENING_RANGE_MINUTES: int = _i("OPENING_RANGE_MINUTES", 15)
     SIGNAL_THRESHOLD: int = _i("SIGNAL_THRESHOLD", 70)       # score 0-100

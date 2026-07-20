@@ -116,3 +116,14 @@ def test_relative_volume_math():
     assert relative_volume(today, prior) == 1.0
     assert relative_volume(today, []) is None
     assert relative_volume(pd.Series([], dtype=float), prior) is None
+
+
+def test_invert_signals_flips_direction(monkeypatch):
+    from analysis.signals import generate_signal
+    # Normal: uptrend -> LONG.
+    assert generate_signal(make_session(UP)).signal == Signal.LONG
+    # Inverted: same uptrend -> SHORT, flagged.
+    monkeypatch.setattr(Config, "INVERT_SIGNALS", True)
+    r = generate_signal(make_session(UP))
+    assert r.signal == Signal.SHORT
+    assert r.details.get("inverted") is True
