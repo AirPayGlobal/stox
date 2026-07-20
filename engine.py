@@ -87,6 +87,8 @@ class TradingEngine:
         self.pending: dict[str, dict] = {}            # underlying -> retrace setup
         self.unmanaged_stock: dict[str, dict] = {}    # broker share positions (warning)
         self._daily_atr_cache: dict[str, tuple] = {}  # underlying -> (date, atr)
+        self._dd = {"peak": 0.0, "current": 0.0, "drawdown": 0.0}
+        self._dd_state = "OK"                         # OK | REDUCED | HALTED
         mode = "DRY RUN" if dry_run else Config.ALPACA_MODE.upper()
         logger.info(
             f"Engine ready | mode={mode} | strategy={Config.STRATEGY} | "
@@ -291,9 +293,36 @@ class TradingEngine:
             self.book.close(symbol, mark, reason)
 
     # ================================================================= Entries
+    def _update_drawdown(self) -> None:
+        from reporting import rolling_drawdown
+
+        self._dd = rolling_drawdown(self.book, Config.DRAWDOWN_WINDOW_DAYS)
+        dd = self._dd["drawdown"]
+        base = Config.DRAWDOWN_BASE
+        prev = self._dd_state
+        if dd >= Config.DRAWDOWN_HALT_PCT * base:
+            self._dd_state = "HALTED"
+        elif dd >= Config.DRAWDOWN_REDUCE_PCT * base:
+            self._dd_state = "REDUCED"
+        else:
+            self._dd_state = "OK"
+        if self._dd_state != prev:
+            logger.warning(
+                f"Drawdown breaker: {prev} -> {self._dd_state} "
+                f"(give-back ${dd:,.0f} from peak ${self._dd['peak']:,.0f})"
+            )
+
     def scan_for_entries(self, equity: float) -> None:
         now_et = datetime.now(ET).time()
         if not (_parse_hhmm(Config.ENTRY_START) <= now_et <= _parse_hhmm(Config.ENTRY_CUTOFF)):
+            return
+
+        self._update_drawdown()
+        if self._dd_state == "HALTED":
+            logger.info(
+                f"Drawdown halt: ${self._dd['drawdown']:,.0f} given back from peak "
+                f"— no new trades (reset day or wait for recovery)"
+            )
             return
 
         pnl = self.engine_day_pnl()
@@ -560,6 +589,8 @@ class TradingEngine:
             )
         else:
             qty = self.risk.contracts_for(equity, premium)
+        if self._dd_state == "REDUCED":
+            qty = qty // 2
         if qty < 1:
             logger.info(f"{underlying}: sized to 0 contracts — skipping ({note})")
             return
@@ -615,6 +646,9 @@ class TradingEngine:
             "equity": self.last_equity,
             "tradable_equity": round(self.tradable_equity(), 2),
             "risk": self.risk.snapshot(self.engine_day_pnl()),
+            "drawdown": {**self._dd, "state": self._dd_state,
+                         "halt_at": round(Config.DRAWDOWN_HALT_PCT * Config.DRAWDOWN_BASE, 0),
+                         "reduce_at": round(Config.DRAWDOWN_REDUCE_PCT * Config.DRAWDOWN_BASE, 0)},
             "book": self.book.summary(),
             "unmanaged_stock_positions": self.unmanaged_stock,
             "signals": self.last_signals,

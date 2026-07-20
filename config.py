@@ -57,6 +57,16 @@ class Config:
     MAX_TRADES_PER_DAY: int = _i("MAX_TRADES_PER_DAY", 12)
     MAX_CONCURRENT_POSITIONS: int = _i("MAX_CONCURRENT_POSITIONS", 3)
 
+    # ---- Rolling-drawdown circuit breaker (multi-day equity-curve stop) ----
+    # How much realized P&L has been given back from its peak over a trailing
+    # window. Beyond REDUCE, new positions are halved; beyond HALT, trading
+    # stops until the give-back recovers or the day is reset. This is what
+    # stops a losing regime from erasing accumulated gains.
+    DRAWDOWN_WINDOW_DAYS: int = _i("DRAWDOWN_WINDOW_DAYS", 20)
+    DRAWDOWN_BASE: float = _f("DRAWDOWN_BASE", 100000.0)          # % thresholds are of this
+    DRAWDOWN_REDUCE_PCT: float = _f("DRAWDOWN_REDUCE_PCT", 0.04)  # halve size beyond this
+    DRAWDOWN_HALT_PCT: float = _f("DRAWDOWN_HALT_PCT", 0.06)      # stop opening beyond this
+
     # ------------------------------------------------------------ Position sizing
     # Risk per trade is the amount lost if the stop-loss fires (premium *
     # STOP_LOSS_PCT), capped at RISK_PER_TRADE_PCT of account equity.

@@ -153,6 +153,19 @@ async function refresh() {
     warn.style.display = "none";
   }
 
+  const dd = s.drawdown || {};
+  if (dd.state && dd.state !== "OK") {
+    warn.style.display = "block";
+    const msg = dd.state === "HALTED"
+      ? `🛑 DRAWDOWN HALT — $${fmt(dd.drawdown,0)} given back from peak $${fmt(dd.peak,0)} ` +
+        `(halt at $${fmt(dd.halt_at,0)}). No new trades until recovery or "Reset day".`
+      : `⚠ DRAWDOWN — reduced size: $${fmt(dd.drawdown,0)} off peak $${fmt(dd.peak,0)} ` +
+        `(halt at $${fmt(dd.halt_at,0)}).`;
+    warn.innerHTML = msg;
+  } else if (!Object.keys(stock).length) {
+    warn.style.display = "none";
+  }
+
   const r = s.risk || {}, b = s.book || {};
   const pnl = r.day_pnl ?? 0, target = r.profit_target ?? 1;
   const pct = Math.min(Math.abs(pnl) / target * 100, 100);
