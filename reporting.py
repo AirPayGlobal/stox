@@ -96,13 +96,17 @@ def trades_since(book: PositionBook, days: int) -> list[Trade]:
     return [t for t in book.book.closed_trades if t.closed_at[:10] >= cutoff]
 
 
-def rolling_drawdown(book: PositionBook, days: int) -> dict:
+def rolling_drawdown(book: PositionBook, days: int, since_iso: str | None = None) -> dict:
     """
     Give-back of realized P&L from its running peak over the trailing window.
     peak is the best cumulative P&L reached (never below 0 — no phantom
     drawdown before the first profit); drawdown = peak - current, >= 0.
+    `since_iso` (a reset marker) additionally excludes trades closed at or
+    before it, so a deliberate rebaseline starts the curve fresh.
     """
     trades = sorted(trades_since(book, days), key=lambda t: t.closed_at)
+    if since_iso:
+        trades = [t for t in trades if t.closed_at > since_iso]
     cum = 0.0
     peak = 0.0
     for t in trades:
