@@ -21,10 +21,13 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from config import Config
 from utils.logger import get_logger
+
+ET = ZoneInfo("America/New_York")
 
 logger = get_logger("risk")
 
@@ -45,6 +48,11 @@ class RiskManager:
 
     def __init__(self) -> None:
         self.state = DayState()
+        # Drawdown-breaker baseline: trades closed before this ISO timestamp
+        # are excluded from the rolling drawdown. Set by reset() so a
+        # deliberate strategy switch starts the equity curve fresh. Survives
+        # day rollover (it is multi-day, not a daily value).
+        self.dd_reset_at: str | None = None
         self._path = os.path.join(Config.STATE_DIR, "day_state.json")
         self._load()
 
@@ -62,10 +70,13 @@ class RiskManager:
             self.start_day()
 
     def reset(self) -> None:
-        """Clear the day's governor state (e.g. to release a stale halt)."""
+        """Clear the day's governor state AND rebaseline the drawdown breaker
+        from now (releases a stale daily halt and a drawdown halt inherited
+        from a prior strategy/regime)."""
         self.state = DayState()
+        self.dd_reset_at = datetime.now(ET).isoformat()
         self._save()
-        logger.info("Day governor reset")
+        logger.info("Day governor reset + drawdown baseline rebaselined")
 
     # ------------------------------------------------------------ Governor
     def profit_floor(self) -> float:
@@ -144,6 +155,7 @@ class RiskManager:
             os.makedirs(Config.STATE_DIR, exist_ok=True)
             data = asdict(self.state)
             data["day"] = self.state.day.isoformat()
+            data["dd_reset_at"] = self.dd_reset_at  # multi-day, survives rollover
             with open(self._path, "w") as f:
                 json.dump(data, f)
         except OSError as exc:
@@ -153,6 +165,8 @@ class RiskManager:
         try:
             with open(self._path) as f:
                 raw = json.load(f)
+            # dd_reset_at is multi-day: load it regardless of the day rollover.
+            self.dd_reset_at = raw.get("dd_reset_at")
             if raw.get("day") == date.today().isoformat():
                 self.state = DayState(
                     day=date.today(),

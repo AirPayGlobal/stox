@@ -54,6 +54,7 @@ def test_engine_breaker_states(tmp_path, monkeypatch):
     monkeypatch.setattr(Config, "DRAWDOWN_REDUCE_PCT", 0.04)  # $4,000
     monkeypatch.setattr(Config, "DRAWDOWN_HALT_PCT", 0.06)    # $6,000
     e = eng.TradingEngine(dry_run=True)
+    e.risk.dd_reset_at = None  # ignore any persisted reset marker
 
     # peak +10,000 then give back 4,500 -> REDUCED (>= 4k, < 6k)
     e.book = book_with_pnls(tmp_path, [10_000, -4_500])

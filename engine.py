@@ -300,7 +300,9 @@ class TradingEngine:
     def _update_drawdown(self) -> None:
         from reporting import rolling_drawdown
 
-        self._dd = rolling_drawdown(self.book, Config.DRAWDOWN_WINDOW_DAYS)
+        self._dd = rolling_drawdown(
+            self.book, Config.DRAWDOWN_WINDOW_DAYS, since_iso=self.risk.dd_reset_at
+        )
         dd = self._dd["drawdown"]
         base = Config.DRAWDOWN_BASE
         prev = self._dd_state
