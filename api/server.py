@@ -203,12 +203,19 @@ def api_backtest(
 
 @app.post("/api/reset-day")
 def api_reset_day(_: str = Depends(_auth)):
-    """Clear the day's governor state — releases a stuck halt/protect lock."""
+    """Clear the day's governor state and rebaseline the drawdown breaker —
+    releases a stuck daily halt, profit lock, or drawdown halt."""
     if _engine is None:
         return {"ok": False, "message": "engine not started"}
     _engine.risk.reset()
-    logger.info("Day governor reset via API")
-    return {"ok": True}
+    # Recompute the drawdown state now so the halt clears immediately instead
+    # of waiting for the next 5-minute entry scan.
+    try:
+        _engine._update_drawdown()
+    except Exception as exc:
+        logger.warning(f"Drawdown recompute after reset failed: {exc}")
+    logger.info("Day governor + drawdown reset via API")
+    return {"ok": True, "drawdown_state": _engine._dd_state}
 
 
 @app.post("/api/stop")
