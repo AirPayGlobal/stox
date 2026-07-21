@@ -42,6 +42,36 @@ def _bucket_stats(trades: list[Trade]) -> dict:
     return out
 
 
+def _trade_quality(trades: list[Trade]) -> dict:
+    """
+    Entry/exit-quality diagnostics from MFE/MAE. Computed only over trades
+    that recorded an MFE (recent trades); older trades logged 0 and are
+    excluded. MFE% is peak favorable mark vs entry premium.
+      immediate_reversal_rate: share with < 5% MFE (entered at a reversal)
+      recoverable_loss_rate  : losers whose MFE reached >= 15% (a breakeven
+                               or trail stop could have scratched them)
+      avg_loser_mfe_pct      : how far the average loser went green first
+    """
+    tracked = [t for t in trades if t.mfe_premium > 0 and t.entry_premium > 0]
+    if not tracked:
+        return {}
+    def mfe_pct(t):
+        return (t.mfe_premium - t.entry_premium) / t.entry_premium
+    losers = [t for t in tracked if t.pnl < 0]
+    return {
+        "sample": len(tracked),
+        "immediate_reversal_rate": round(
+            sum(1 for t in tracked if mfe_pct(t) < 0.05) / len(tracked), 3
+        ),
+        "recoverable_loss_rate": round(
+            sum(1 for t in losers if mfe_pct(t) >= 0.15) / len(losers), 3
+        ) if losers else 0.0,
+        "avg_loser_mfe_pct": round(
+            sum(mfe_pct(t) for t in losers) / len(losers), 3
+        ) if losers else 0.0,
+    }
+
+
 def _concentration(trades: list[Trade]) -> dict:
     """How dependent is the profit on a few outliers?"""
     win_pnls = sorted((t.pnl for t in trades if t.pnl > 0), reverse=True)
@@ -136,6 +166,7 @@ def period_report(book: PositionBook, days: int = 30) -> dict:
         "avg_day": round(sum(daily_pnls) / len(daily_pnls), 2),
         "max_drawdown": round(max_drawdown, 2),
         "concentration": _concentration(trades),
+        "trade_quality": _trade_quality(trades),
         "daily": daily_rows,
         "per_strategy": group(lambda t: t.strategy or "orb"),
         "per_underlying": group(lambda t: t.underlying),

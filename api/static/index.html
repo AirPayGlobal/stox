@@ -283,6 +283,20 @@ async function loadReport(days) {
     card("Max drawdown", money(-r.max_drawdown), "neg") +
     `</div>`;
 
+  const tq = r.trade_quality || {};
+  if (tq.sample) {
+    html += `<div class="cards">` +
+      card("Bad-entry rate", fmt(tq.immediate_reversal_rate*100,0) + "%",
+           tq.immediate_reversal_rate > 0.4 ? "neg" : "") +
+      card("Recoverable losers", fmt(tq.recoverable_loss_rate*100,0) + "%") +
+      card("Avg loser peak gain", fmt(tq.avg_loser_mfe_pct*100,0) + "%") +
+      `</div>` +
+      `<div style="color:#8b949e;font-size:12px;margin-bottom:8px">` +
+      `bad-entry = went &lt;5% green (entered at reversal) · recoverable = ` +
+      `loser that reached +15% first (breakeven/trail could scratch it) · ` +
+      `n=${tq.sample} MFE-tracked trades</div>`;
+  }
+
   html += `<h2>By strategy</h2><table><thead><tr>
     <th></th><th>Trades</th><th>Win rate</th><th>P&L</th><th>Avg win / loss</th><th>PF</th>
     </tr></thead><tbody>` +
