@@ -114,9 +114,11 @@ class Config:
 
     # ------------------------------------------------------------ Signals
     # STRATEGY: "orb" (opening-range momentum), "sweep" (liquidity-sweep
-    # reversal), or "both". Default is orb-only: live results (PF 2.22 vs
-    # 0.99) put sweep on the bench until it re-qualifies.
-    STRATEGY: str = os.getenv("STRATEGY", "orb").lower()
+    # reversal), or "both". Default is sweep-only: a 60-day SPY backtest put
+    # sweep strongly positive (+$30k, 46% win) while orb (-$12.9k) and swing
+    # (-$2.5k) were net negative — reversing the earlier 10-trade live call.
+    # Sweep is now on a live paper trial to confirm the backtest edge.
+    STRATEGY: str = os.getenv("STRATEGY", "sweep").lower()
     # Diagnostic: flip every LONG<->SHORT signal. For TESTING whether the
     # inverse has an edge (backtest it) — not a money button. Costs and exit
     # asymmetry mean a losing strategy rarely inverts into a winning one.
