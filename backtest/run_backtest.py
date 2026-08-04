@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pandas as pd
 
-from analysis.exits import effective_stop, fixed_target_active
+from analysis.exits import effective_stop, fixed_target_active, sweep_trail_stop
 from analysis.htf import completed_bars, resample_bars
 from analysis.indicators import atr as atr_indicator
 from analysis.indicators import relative_volume
@@ -233,6 +233,10 @@ def simulate_day_sweep(
         spot = float(day_bars["close"].iloc[i])
 
         if open_trade:
+            mark = bs_price(
+                spot, open_trade["strike"], t_to_expiry_years(ts), iv, open_trade["type"]
+            )
+            open_trade["mfe"] = max(open_trade["mfe"], mark)
             reason = None
             if ts.time() >= flatten:
                 reason = "FLATTEN"
@@ -246,6 +250,10 @@ def simulate_day_sweep(
                     reason = "UL_SL"
                 elif spot <= open_trade["target_ul"]:
                     reason = "UL_TP"
+            if reason is None:
+                trail = sweep_trail_stop(open_trade["entry"], open_trade["mfe"])
+                if trail is not None and mark <= trail:
+                    reason = "TRAIL"
             if reason:
                 closed = _close_synthetic(open_trade, spot, ts, iv, reason)
                 closed["closed_ts"] = ts
