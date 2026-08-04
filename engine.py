@@ -273,6 +273,12 @@ class TradingEngine:
                     return "UL_SL"
                 if trade.target_underlying and price <= trade.target_underlying:
                     return "UL_TP"
+        # Premium trailing stop — bank a gamma spike before it round-trips.
+        from analysis.exits import sweep_trail_stop
+
+        trail = sweep_trail_stop(trade.entry_premium, trade.mfe_premium)
+        if trail is not None and mark <= trail:
+            return "TRAIL"
         # Disaster backstop on premium (fills/gaps the level check can miss).
         if mark <= trade.stop_premium:
             return "SL"

@@ -39,3 +39,21 @@ def test_trailing_never_lowers_stop(monkeypatch):
     monkeypatch.setattr(Config, "ORB_TRAIL_PCT", 0.20)
     # Peak barely over trigger: trailed stop (1.31*0.8=1.048) exceeds base.
     assert effective_stop(1.00, 0.70, mfe=1.31) > 0.70
+
+
+def test_sweep_trail_disabled_by_default(monkeypatch):
+    from analysis.exits import sweep_trail_stop
+    monkeypatch.setattr(Config, "SWEEP_TRAIL_TRIGGER_PCT", 0.0)
+    assert sweep_trail_stop(entry=1.00, mfe=3.00) is None
+
+
+def test_sweep_trail_arms_after_trigger(monkeypatch):
+    from analysis.exits import sweep_trail_stop
+    monkeypatch.setattr(Config, "SWEEP_TRAIL_TRIGGER_PCT", 0.40)  # +40%
+    monkeypatch.setattr(Config, "SWEEP_TRAIL_PCT", 0.25)
+    # Below trigger: not armed.
+    assert sweep_trail_stop(1.00, mfe=1.30) is None
+    # Peaked +100% (mark 2.00): trail 25% below -> 1.50.
+    assert sweep_trail_stop(1.00, mfe=2.00) == pytest.approx(1.50)
+    # The +206% give-back case: peak 3.06 -> trail 2.295 (banks most of it).
+    assert sweep_trail_stop(1.00, mfe=3.06) == pytest.approx(2.295)

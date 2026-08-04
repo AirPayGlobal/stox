@@ -172,6 +172,11 @@ class Config:
     SWEEP_ENTRY: str = os.getenv("SWEEP_ENTRY", "close").lower()  # "close" | "retrace"
     SWEEP_RETRACE_EXPIRY_MIN: int = _i("SWEEP_RETRACE_EXPIRY_MIN", 60)
     SWEEP_DISASTER_STOP_PCT: float = _f("SWEEP_DISASTER_STOP_PCT", 0.60)
+    # Premium trailing stop for sweep — banks a gamma spike before it
+    # round-trips (live MFE showed losers peaking +20% to +200% first).
+    # Default OFF; backtest before enabling.
+    SWEEP_TRAIL_TRIGGER_PCT: float = _f("SWEEP_TRAIL_TRIGGER_PCT", 0.0)
+    SWEEP_TRAIL_PCT: float = _f("SWEEP_TRAIL_PCT", 0.25)
     # Skip sweep setups whose wick stop is closer than this fraction of spot:
     # near-zero stop distance lets "1% risk" sizing balloon to the outlay cap,
     # and slippage makes the theoretical risk fictional (backtest artifact #2).
