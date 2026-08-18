@@ -78,7 +78,7 @@ class PositionBook:
         planned_risk: float = 0.0,
         spread_at_entry: float = 0.0,
     ) -> Trade:
-        if strategy == "sweep":
+        if strategy in ("sweep", "fib"):
             # Exits are driven by underlying levels; the premium stop is only
             # a wide disaster backstop and there is no premium target.
             stop_premium = round(entry_premium * (1 - Config.SWEEP_DISASTER_STOP_PCT), 2)

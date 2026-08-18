@@ -188,7 +188,7 @@ def api_backtest(
 ):
     """Run a backtest server-side and return the results summary. Synchronous:
     expect a few seconds per symbol (data fetch + simulation)."""
-    if strategy not in ("orb", "sweep", "swing", "both", "all"):
+    if strategy not in ("orb", "sweep", "swing", "fib", "both", "all"):
         return {"error": f"unknown strategy '{strategy}'"}
     days = max(5, min(days, 365))
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] or Config.UNDERLYINGS
