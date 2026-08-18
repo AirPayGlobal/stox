@@ -84,6 +84,7 @@ class TradingEngine:
         self.last_equity: float = 0.0
         # sweep bookkeeping
         self._acted_sweeps: set[str] = set()          # candle dedupe keys
+        self._acted_fib: set[str] = set()             # fib setup dedupe keys
         self.pending: dict[str, dict] = {}            # underlying -> retrace setup
         self.unmanaged_stock: dict[str, dict] = {}    # broker share positions (warning)
         self._daily_atr_cache: dict[str, tuple] = {}  # underlying -> (date, atr)
@@ -348,6 +349,8 @@ class TradingEngine:
                 self._scan_orb(underlying, equity)
             if Config.STRATEGY in ("sweep", "both"):
                 self._scan_sweep(underlying, equity)
+            if Config.STRATEGY == "fib":
+                self._scan_fib(underlying, equity)
 
     def _entry_blocked(self, underlying: str) -> str | None:
         """Re-entry discipline: hard per-day cutoff after consecutive losers,
@@ -417,6 +420,57 @@ class TradingEngine:
             spot=result.price,
             strategy="orb",
             note=f"score={result.score}",
+        )
+
+    # ------------------------------------------------------------ Fib pullback
+    def _scan_fib(self, underlying: str, equity: float) -> None:
+        from analysis.fib import fib_signal
+
+        bars = get_intraday_bars(underlying, minutes=Config.FIB_BAR_MINUTES, lookback_days=1)
+        if bars.empty:
+            return
+        today = datetime.now(ET).date()
+        bars = bars[bars.index.date == today]
+        if len(bars) < 2 * Config.FIB_PIVOT_K + 3:
+            return
+        spot = float(bars["close"].iloc[-1])
+
+        sig = fib_signal(bars)
+        cache_key = f"{underlying}·fib"
+        if sig is None:
+            self.last_signals[cache_key] = {
+                "signal": "FLAT", "score": 0, "price": round(spot, 2),
+                "at": datetime.now(ET).isoformat(timespec="seconds"),
+            }
+            return
+
+        self.last_signals[cache_key] = {
+            "signal": sig.direction.value, "score": 100, "price": round(spot, 2),
+            "zone": f"{sig.entry_lo}-{sig.entry_hi}",
+            "stop": sig.stop, "target": sig.target,
+            "at": datetime.now(ET).isoformat(timespec="seconds"),
+        }
+
+        dedupe = f"{underlying}|{sig.key}"
+        if dedupe in self._acted_fib:
+            return
+        if self.book.open_for(underlying):
+            return
+        blocked = self._entry_blocked(underlying)
+        if blocked:
+            logger.info(f"{underlying} fib entry blocked: {blocked}")
+            return
+        if not stop_distance_ok(spot, sig.stop):
+            logger.info(
+                f"{underlying} fib skipped: stop distance {abs(spot - sig.stop):.2f} "
+                f"outside tradeable band (spot {spot:.2f})"
+            )
+            return
+        self._acted_fib.add(dedupe)
+        self._enter(
+            underlying, sig.direction, spot=spot, strategy="fib",
+            stop_underlying=sig.stop, target_underlying=sig.target,
+            note=f"gold-zone {sig.entry_lo}-{sig.entry_hi}",
         )
 
     # ------------------------------------------------------------ Sweep reversal
@@ -595,7 +649,7 @@ class TradingEngine:
 
         premium = contract.ask  # assume paying the offer on a market order
         equity = self.tradable_equity()
-        if strategy == "sweep":
+        if strategy in ("sweep", "fib"):
             qty = self.risk.contracts_for_underlying_stop(
                 equity, premium, contract.delta, abs(spot - stop_underlying)
             )
@@ -607,7 +661,7 @@ class TradingEngine:
             logger.info(f"{underlying}: sized to 0 contracts — skipping ({note})")
             return
 
-        if strategy == "sweep":
+        if strategy in ("sweep", "fib"):
             planned_risk = (
                 min(abs(contract.delta or 0.5) * abs(spot - stop_underlying), premium)
                 * 100 * qty

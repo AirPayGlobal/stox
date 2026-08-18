@@ -53,3 +53,32 @@ option loss: `risk/contract ≈ |delta| × stop_distance × 100`, capped at
 - Backtest first, then paper trade. If the sweep strategy underperforms ORB
   over a meaningful sample, turn it off (`STRATEGY=orb`) rather than
   romanticizing it.
+
+---
+
+# Fibonacci pullback strategy (current, 1-minute)
+
+Systemized from the "gold zone" Fib scalping method. Unlike ORB (breakout
+chase) and sweep (reversal at a level) — both of which lost live because
+they **entered at reversals** — this enters *with* an established trend on a
+retracement, at a favorable price.
+
+Mechanics (`analysis/fib.py`, pure/testable):
+
+1. **Impulse leg** — fractal pivots on 1-min bars (`FIB_PIVOT_K` bars each
+   side) give the most recent swing low→high (up) or high→low (down). A fresh
+   impulse making a new local extreme is the break of structure.
+2. **Gold-zone entry** — wait for price to retrace into the 0.5–0.618 band
+   of that leg (`FIB_ENTRY_LOW`/`FIB_ENTRY_HIGH`), in the trend direction.
+   LONG → calls, SHORT → puts. Legs smaller than `FIB_MIN_RANGE_PCT` × spot
+   are ignored as noise.
+3. **Exits (on the underlying)** — stop at the fib 1.0 level (leg origin —
+   trend invalidated), target the impulse extreme (continuation). Entry near
+   0.618 gives ≈1:1.6 reward:risk. Plus the wide premium disaster backstop
+   and the 15:50 flatten.
+
+Sizing, governor, drawdown breaker, reconciliation and reporting are shared
+with the other strategies. **Validate in the backtester (`--strategy fib`)
+before trusting live** — the honest caveat stands: it still buys premium
+intraday, so friction is a headwind; the pullback entry is the thesis for
+why it might beat the breakout/reversal approaches, not a guarantee.

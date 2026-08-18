@@ -293,11 +293,71 @@ def simulate_day_sweep(
     return trades
 
 
+def simulate_day_fib(symbol: str, day_bars: pd.DataFrame, equity: float) -> list[dict]:
+    """Fibonacci pullback on 1-minute bars: underlying-level stop (fib 1.0) /
+    target (impulse extreme), engine parity."""
+    from analysis.fib import fib_signal
+
+    trades: list[dict] = []
+    open_trade: dict | None = None
+    iv = realized_iv(day_bars)
+    entry_start, entry_cutoff, flatten = _session_times()
+    acted: set[str] = set()
+    k = Config.FIB_PIVOT_K
+
+    for i in range(2 * k + 3, len(day_bars)):
+        ts = day_bars.index[i]
+        window = day_bars.iloc[: i + 1]
+        spot = float(window["close"].iloc[-1])
+
+        if open_trade:
+            mark = bs_price(
+                spot, open_trade["strike"], t_to_expiry_years(ts), iv, open_trade["type"]
+            )
+            open_trade["mfe"] = max(open_trade["mfe"], mark)
+            reason = None
+            if ts.time() >= flatten:
+                reason = "FLATTEN"
+            elif open_trade["direction"] == "LONG":
+                if spot <= open_trade["stop_ul"]:
+                    reason = "UL_SL"
+                elif spot >= open_trade["target_ul"]:
+                    reason = "UL_TP"
+            else:
+                if spot >= open_trade["stop_ul"]:
+                    reason = "UL_SL"
+                elif spot <= open_trade["target_ul"]:
+                    reason = "UL_TP"
+            if reason:
+                closed = _close_synthetic(open_trade, spot, ts, iv, reason)
+                closed["closed_ts"] = ts
+                trades.append(closed)
+                open_trade = None
+            continue
+
+        if not (entry_start <= ts.time() <= entry_cutoff):
+            continue
+        if _loss_discipline_blocked(trades, ts):
+            continue
+        sig = fib_signal(window)
+        if sig is None or sig.key in acted:
+            continue
+        acted.add(sig.key)
+        if not stop_distance_ok(spot, sig.stop):
+            continue
+        open_trade = _open_synthetic(
+            symbol, ts, sig.direction, spot, iv, equity,
+            stop_ul=sig.stop, target_ul=sig.target,
+        )
+
+    return trades
+
+
 def _resolve_strategies(strategy: str) -> list[str]:
     if strategy == "both":
         return ["orb", "sweep"]
     if strategy == "all":
-        return ["orb", "sweep", "swing"]
+        return ["orb", "sweep", "swing", "fib"]
     return [strategy]
 
 
@@ -372,6 +432,13 @@ def run_backtest(symbols: list[str], days: int, equity: float, strategy: str) ->
             )
             if not swing_bars.empty:
                 by_strategy["swing"] += simulate_swing(symbol, swing_bars, equity)
+        if "fib" in strategies:
+            fib_bars = get_intraday_bars(
+                symbol, minutes=Config.FIB_BAR_MINUTES, lookback_days=days
+            )
+            if not fib_bars.empty:
+                for day, day_bars in fib_bars.groupby(fib_bars.index.date):
+                    by_strategy["fib"] += simulate_day_fib(symbol, day_bars, equity)
 
     return {
         "symbols": symbols,
@@ -419,7 +486,7 @@ def main() -> None:
     parser.add_argument("--equity", type=float, default=100_000)
     parser.add_argument(
         "--strategy",
-        choices=["orb", "sweep", "swing", "both", "all"],
+        choices=["orb", "sweep", "swing", "fib", "both", "all"],
         default=Config.STRATEGY,
     )
     args = parser.parse_args()

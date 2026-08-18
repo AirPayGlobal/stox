@@ -113,12 +113,13 @@ class Config:
     MIN_BID: float = _f("MIN_BID", 0.10)
 
     # ------------------------------------------------------------ Signals
-    # STRATEGY: "orb" (opening-range momentum), "sweep" (liquidity-sweep
-    # reversal), or "both". Default is sweep-only: a 60-day SPY backtest put
-    # sweep strongly positive (+$30k, 46% win) while orb (-$12.9k) and swing
-    # (-$2.5k) were net negative — reversing the earlier 10-trade live call.
-    # Sweep is now on a live paper trial to confirm the backtest edge.
-    STRATEGY: str = os.getenv("STRATEGY", "sweep").lower()
+    # STRATEGY: "fib" (Fibonacci-retracement pullback, current), "orb", or
+    # "sweep" (both legacy — net-negative over 20+ live trades, kept for
+    # backtest comparison only). Fib is the new approach: a with-trend
+    # pullback entry into the 0.5-0.618 gold zone, addressing the
+    # entered-at-reversals flaw that sank orb and sweep. Validate in the
+    # backtester before trusting live.
+    STRATEGY: str = os.getenv("STRATEGY", "fib").lower()
     # Diagnostic: flip every LONG<->SHORT signal. For TESTING whether the
     # inverse has an edge (backtest it) — not a money button. Costs and exit
     # asymmetry mean a losing strategy rarely inverts into a winning one.
@@ -126,6 +127,13 @@ class Config:
     BAR_MINUTES: int = _i("BAR_MINUTES", 5)
     OPENING_RANGE_MINUTES: int = _i("OPENING_RANGE_MINUTES", 15)
     SIGNAL_THRESHOLD: int = _i("SIGNAL_THRESHOLD", 70)       # score 0-100
+
+    # ------------------------------------------------------------ Fib pullback
+    FIB_BAR_MINUTES: int = _i("FIB_BAR_MINUTES", 1)         # 1-minute structure
+    FIB_PIVOT_K: int = _i("FIB_PIVOT_K", 3)                 # fractal half-width
+    FIB_ENTRY_LOW: float = _f("FIB_ENTRY_LOW", 0.50)        # gold zone shallow edge
+    FIB_ENTRY_HIGH: float = _f("FIB_ENTRY_HIGH", 0.618)     # gold zone deep edge
+    FIB_MIN_RANGE_PCT: float = _f("FIB_MIN_RANGE_PCT", 0.0015)  # min leg size / spot
 
     # ------------------------------------------------------------ ORB entry filters
     # ALL DEFAULT OFF: these are unvalidated against the live track record,
