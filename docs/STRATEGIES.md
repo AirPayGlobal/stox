@@ -65,17 +65,28 @@ retracement, at a favorable price.
 
 Mechanics (`analysis/fib.py`, pure/testable):
 
-1. **Impulse leg** — fractal pivots on 1-min bars (`FIB_PIVOT_K` bars each
-   side) give the most recent swing low→high (up) or high→low (down). A fresh
-   impulse making a new local extreme is the break of structure.
-2. **Gold-zone entry** — wait for price to retrace into the 0.5–0.618 band
-   of that leg (`FIB_ENTRY_LOW`/`FIB_ENTRY_HIGH`), in the trend direction.
-   LONG → calls, SHORT → puts. Legs smaller than `FIB_MIN_RANGE_PCT` × spot
-   are ignored as noise.
+1. **Impulse leg (swing-anchored)** — fractal pivots on 1-min bars
+   (`FIB_PIVOT_K` bars each side). The active leg is anchored on the *dominant*
+   swing of the last `FIB_LOOKBACK_BARS`: the highest H pivot and the lowest L
+   pivot in that window. The order of those two extremes sets the direction (top
+   after bottom → up-impulse → LONG; mirror for SHORT). Anchoring on the swing
+   extremes — rather than the last two pivots — is what lets the setup **survive
+   the pullback**: a shallow retracement prints a minor pivot, but it is neither
+   a new high nor a new low, so the fib anchors don't move. (The old rule flipped
+   the leg the instant the pullback printed a pivot, so most 0.5–0.618 entries —
+   the deep ones the strategy wants most — were never taken. That is why it only
+   traded ~1×/day.)
+2. **Gold-zone entry** — a bar that wicks into the 0.5–0.618 band of that leg
+   (`FIB_ENTRY_LOW`/`FIB_ENTRY_HIGH`), with the trend, origin not yet broken.
+   LONG → calls, SHORT → puts. Legs smaller than `FIB_MIN_RANGE_PCT` × spot are
+   ignored as noise, and the stop distance must sit inside fib's own band
+   (`FIB_MIN_STOP_PCT`…`FIB_MAX_STOP_PCT`) — previously it borrowed the sweep
+   strategy's 60-minute bounds, which discarded most 1-minute legs.
 3. **Exits (on the underlying)** — stop at the fib 1.0 level (leg origin —
    trend invalidated), target the impulse extreme (continuation). Entry near
-   0.618 gives ≈1:1.6 reward:risk. Plus the wide premium disaster backstop
-   and the 15:50 flatten.
+   0.618 gives ≈1:1.6 reward:risk. A `FIB_MAX_HOLD_MINUTES` time stop frees the
+   slot when a pullback stalls, plus the wide premium disaster backstop and the
+   15:50 flatten. Runs on `SPY,QQQ` by default for a wider setup universe.
 
 Sizing, governor, drawdown breaker, reconciliation and reporting are shared
 with the other strategies. **Validate in the backtester (`--strategy fib`)

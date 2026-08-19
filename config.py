@@ -37,7 +37,7 @@ class Config:
     # Production is isolated to the demonstrated edge (SPY ORB). QQQ and the
     # sweep strategy remain available via env override and in the backtester,
     # but must prove positive expectancy independently before rejoining.
-    UNDERLYINGS: list = _list("UNDERLYINGS", "SPY")
+    UNDERLYINGS: list = _list("UNDERLYINGS", "SPY,QQQ")
 
     # ------------------------------------------------------------ Daily governor
     # Hitting the profit target does NOT stop trading — it arms profit
@@ -133,7 +133,13 @@ class Config:
     FIB_PIVOT_K: int = _i("FIB_PIVOT_K", 2)                 # fractal half-width (lag)
     FIB_ENTRY_LOW: float = _f("FIB_ENTRY_LOW", 0.50)        # gold zone shallow edge
     FIB_ENTRY_HIGH: float = _f("FIB_ENTRY_HIGH", 0.618)     # gold zone deep edge
-    FIB_MIN_RANGE_PCT: float = _f("FIB_MIN_RANGE_PCT", 0.0015)  # min leg size / spot
+    FIB_MIN_RANGE_PCT: float = _f("FIB_MIN_RANGE_PCT", 0.0007)  # min leg size / spot
+    FIB_LOOKBACK_BARS: int = _i("FIB_LOOKBACK_BARS", 45)   # window for the active swing
+    # Fib's own stop-distance band (was borrowing sweep's 60-min bounds, which
+    # filtered out most 1-min legs). Distance ~= 0.5 x leg range.
+    FIB_MIN_STOP_PCT: float = _f("FIB_MIN_STOP_PCT", 0.0005)  # ~ $0.28 on SPY
+    FIB_MAX_STOP_PCT: float = _f("FIB_MAX_STOP_PCT", 0.012)   # ~ $6.6 on SPY
+    FIB_MAX_HOLD_MINUTES: int = _i("FIB_MAX_HOLD_MINUTES", 45)  # time stop (0 = off)
 
     # ------------------------------------------------------------ ORB entry filters
     # ALL DEFAULT OFF: these are unvalidated against the live track record,

@@ -297,6 +297,7 @@ def simulate_day_fib(symbol: str, day_bars: pd.DataFrame, equity: float) -> list
     """Fibonacci pullback on 1-minute bars: underlying-level stop (fib 1.0) /
     target (impulse extreme), engine parity."""
     from analysis.fib import fib_signal
+    from analysis.fib import stop_distance_ok as fib_stop_ok
 
     trades: list[dict] = []
     open_trade: dict | None = None
@@ -315,6 +316,7 @@ def simulate_day_fib(symbol: str, day_bars: pd.DataFrame, equity: float) -> list
                 spot, open_trade["strike"], t_to_expiry_years(ts), iv, open_trade["type"]
             )
             open_trade["mfe"] = max(open_trade["mfe"], mark)
+            minutes_open = (ts - open_trade["opened"]).total_seconds() / 60
             reason = None
             if ts.time() >= flatten:
                 reason = "FLATTEN"
@@ -328,6 +330,10 @@ def simulate_day_fib(symbol: str, day_bars: pd.DataFrame, equity: float) -> list
                     reason = "UL_SL"
                 elif spot <= open_trade["target_ul"]:
                     reason = "UL_TP"
+            if reason is None and Config.FIB_MAX_HOLD_MINUTES and (
+                minutes_open >= Config.FIB_MAX_HOLD_MINUTES
+            ):
+                reason = "TIME"
             if reason:
                 closed = _close_synthetic(open_trade, spot, ts, iv, reason)
                 closed["closed_ts"] = ts
@@ -343,7 +349,7 @@ def simulate_day_fib(symbol: str, day_bars: pd.DataFrame, equity: float) -> list
         if sig is None or sig.key in acted:
             continue
         acted.add(sig.key)
-        if not stop_distance_ok(spot, sig.stop):
+        if not fib_stop_ok(spot, sig.stop):
             continue
         open_trade = _open_synthetic(
             symbol, ts, sig.direction, spot, iv, equity,
