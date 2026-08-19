@@ -12,6 +12,7 @@ import io
 from collections import defaultdict
 from datetime import date, timedelta
 
+from config import Config
 from trading.positions import PositionBook, Trade
 
 
@@ -176,6 +177,88 @@ def period_report(book: PositionBook, days: int = 30) -> dict:
         "per_underlying": group(lambda t: t.underlying),
         "per_hour": group(lambda t: t.opened_at[11:13] + ":00"),
         "exit_reasons": dict(exit_reasons),
+    }
+
+
+def strategy_live_stats(book: PositionBook, strategy: str, days: int) -> dict:
+    """Live trade stats for one strategy over the trailing window, in the SAME
+    field shape the backtester's `_stats` emits, so the two can be laid side by
+    side. `expectancy` (P&L per trade) is added to both sides for comparison."""
+    trades = [
+        t for t in trades_since(book, days) if (t.strategy or "orb") == strategy
+    ]
+    if not trades:
+        return {"trades": 0}
+    by_day: dict[str, float] = defaultdict(float)
+    for t in trades:
+        by_day[t.closed_at[:10]] += t.pnl
+    daily = list(by_day.values())
+    wins = [t for t in trades if t.pnl > 0]
+    total = sum(t.pnl for t in trades)
+    target = Config.DAILY_PROFIT_TARGET
+    reasons: dict[str, int] = defaultdict(int)
+    for t in trades:
+        reasons[t.status] += 1
+    mean = sum(daily) / len(daily)
+    var = sum((d - mean) ** 2 for d in daily) / len(daily) if len(daily) > 1 else 0.0
+    return {
+        "trades": len(trades),
+        "trading_days": len(by_day),
+        "win_rate": round(len(wins) / len(trades), 3),
+        "total_pnl": round(total, 0),
+        "expectancy": round(total / len(trades), 2),
+        "avg_daily_pnl": round(mean, 0),
+        "median_daily_pnl": round(sorted(daily)[len(daily) // 2], 0),
+        "best_day": round(max(daily), 0),
+        "worst_day": round(min(daily), 0),
+        "daily_stdev": round(var ** 0.5, 0),
+        "days_at_target": sum(1 for d in daily if d >= target),
+        "exit_reasons": dict(reasons),
+    }
+
+
+def live_vs_backtest(
+    live: dict, backtest: dict, min_sample: int = 20
+) -> dict:
+    """Compare live and simulated stats for one strategy and classify the drift.
+    The point is the check that exposed sweep: a strategy can look great in the
+    backtester (upper-bound fills) and bleed live once real spreads bite."""
+    lt = live.get("trades", 0)
+    bt = backtest.get("trades", 0)
+    # Put expectancy on the backtest side too (its _stats omits it).
+    if bt:
+        backtest = {**backtest, "expectancy": round(backtest["total_pnl"] / bt, 2)}
+    le = live.get("expectancy", 0.0)
+    be = backtest.get("expectancy", 0.0)
+
+    if not bt:
+        verdict, note = "no_backtest", "No simulated trades to compare against."
+    elif lt < min_sample:
+        verdict = "collecting"
+        note = f"{lt}/{min_sample} live trades — too few to judge drift yet."
+    elif le <= 0 < be:
+        verdict = "diverging"
+        note = "Live expectancy is negative while the backtest was positive — the sweep failure mode. Do not size up."
+    elif be > 0 and le >= 0.6 * be:
+        verdict = "tracking"
+        note = "Live expectancy is within ~40% of the backtest — the edge is holding so far."
+    elif be > 0:
+        verdict = "underperforming"
+        note = "Live expectancy is well below the backtest — friction is eating the edge."
+    else:
+        verdict = "tracking" if le >= be else "underperforming"
+        note = "Backtest expectancy was non-positive; comparison is weak."
+
+    ratio = round(le / be, 2) if be else None
+    return {
+        "verdict": verdict,
+        "note": note,
+        "min_sample": min_sample,
+        "expectancy_ratio": ratio,
+        "win_rate_delta": round(live.get("win_rate", 0) - backtest.get("win_rate", 0), 3),
+        "expectancy_delta": round(le - be, 2),
+        "live": live,
+        "backtest": backtest,
     }
 
 

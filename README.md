@@ -132,6 +132,14 @@ uvicorn api.server:app --host 0.0.0.0 --port 8000
 # open http://localhost:8000  (basic auth: DASHBOARD_USER / DASHBOARD_PASS)
 ```
 
+The dashboard also has a **Live vs backtest** panel: it runs the selected
+strategy through the backtester over the same window and lays those
+(upper-bound) stats beside the live trade record, then classifies the drift
+(`collecting` / `tracking` / `underperforming` / `diverging`). This is the
+check that exposed the sweep strategy — a strong backtest that bled once real
+spreads bit — so run it once ~20 live trades have accumulated before trusting
+a strategy with real money. Exposed at `GET /api/compare?strategy=&days=`.
+
 The engine **starts automatically when the server boots** (default state is
 running). Set `ENGINE_AUTOSTART=false` to require pressing ▶ Start instead,
 or `ENGINE_AUTOSTART_DRY=true` to auto-start in signals-only dry-run mode.

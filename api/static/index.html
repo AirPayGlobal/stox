@@ -105,12 +105,38 @@
   </div>
   <div id="bt-results" style="margin-top:12px"></div>
 </div>
+<h2>Live vs backtest</h2>
+<div class="bar-wrap" id="cmp-form">
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
+    <select id="cmp-strategy">
+      <option value="fib">fib (gold-zone pullback)</option>
+      <option value="sweep">sweep</option>
+      <option value="orb">orb</option>
+      <option value="swing">swing</option>
+    </select>
+    <input id="cmp-days" type="number" value="30" min="5" max="365" title="days"> days
+    <input id="cmp-equity" type="number" value="100000" step="10000" title="equity"> equity
+    <button class="dry" id="cmp-run" onclick="runCompare()">Compare</button>
+    <span id="cmp-status" style="color:#8b949e"></span>
+  </div>
+  <div id="cmp-results" style="margin-top:12px">
+    <div style="color:#8b949e;font-size:12px">Lays the live trade record beside the
+    same-window backtest and flags drift — the check that exposed sweep. Needs ~20
+    live trades before it will judge.</div>
+  </div>
+</div>
+
 <style>
   select, input[type=number], input[type=text] {
     background:#0d1117; color:#e6edf3; border:1px solid #30363d;
     border-radius:6px; padding:6px 8px;
   }
   input[type=number] { width:90px; }
+  .verdict { display:inline-block; padding:2px 10px; border-radius:10px;
+    font-weight:600; font-size:13px; }
+  .v-tracking { background:#1a4d2e; color:#7ee2a8; }
+  .v-collecting, .v-no_backtest { background:#3d3620; color:#e2c97e; }
+  .v-diverging, .v-underperforming { background:#5a1e1e; color:#f0a0a0; }
 </style>
 
 <script>
@@ -250,6 +276,58 @@ async function runBacktest() {
     }
     html += `<div style="color:#8b949e; font-size:12px">⚠ ${res.caveat}</div>`;
     document.getElementById("bt-results").innerHTML = html;
+  } catch (e) {
+    st.textContent = "request failed: " + e;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function runCompare() {
+  const btn = document.getElementById("cmp-run"), st = document.getElementById("cmp-status");
+  const strat = document.getElementById("cmp-strategy").value;
+  const params = new URLSearchParams({
+    strategy: strat,
+    days: document.getElementById("cmp-days").value,
+    equity: document.getElementById("cmp-equity").value,
+  });
+  btn.disabled = true;
+  st.textContent = "running backtest… (~30s)";
+  try {
+    const r = await (await fetch("/api/compare?" + params)).json();
+    if (r.error) { st.textContent = "error: " + r.error; return; }
+    st.textContent = `${r.strategy} · ${r.days} days`;
+    const L = r.live || {}, B = r.backtest || {};
+    const exits = s => Object.entries(s.exit_reasons || {}).map(([k,v]) => k+":"+v).join(" · ") || "—";
+    const row = (label, lv, bv, cls="") =>
+      `<tr><td>${label}</td><td class="${cls}">${lv}</td><td style="color:#8b949e">${bv}</td></tr>`;
+    const wd = r.win_rate_delta, ed = r.expectancy_delta;
+    document.getElementById("cmp-results").innerHTML =
+      `<div style="margin-bottom:10px">` +
+      `<span class="verdict v-${r.verdict}">${r.verdict.replace(/_/g," ")}</span> ` +
+      `<span style="color:#8b949e;font-size:13px">${r.note}</span></div>` +
+      `<table><thead><tr><th></th><th>Live</th><th>Backtest (sim)</th></tr></thead><tbody>` +
+      row("Trades", L.trades ?? 0, B.trades ?? 0) +
+      row("Win rate",
+          L.trades ? fmt(L.win_rate*100,0)+"%" : "—",
+          B.trades ? fmt(B.win_rate*100,0)+"%" : "—",
+          wd < -0.1 ? "neg" : "") +
+      row("Expectancy / trade",
+          L.trades ? money(L.expectancy) : "—",
+          B.trades ? money(B.expectancy) : "—",
+          (L.expectancy ?? 0) < 0 ? "neg" : "pos") +
+      row("Total P&L",
+          L.trades ? money(L.total_pnl) : "—",
+          B.trades ? money(B.total_pnl) : "—") +
+      row("Avg day",
+          L.trades ? money(L.avg_daily_pnl) : "—",
+          B.trades ? money(B.avg_daily_pnl) : "—") +
+      row("Exits", exits(L), exits(B)) +
+      `</tbody></table>` +
+      `<div style="color:#8b949e;font-size:12px;margin-top:6px">` +
+      `expectancy ratio (live÷sim): ${r.expectancy_ratio ?? "—"} · ` +
+      `win-rate Δ ${wd >= 0 ? "+" : ""}${fmt(wd*100,0)}pp · ` +
+      `expectancy Δ ${money(ed)}. Backtest = upper bound (no real spread/slippage).</div>`;
   } catch (e) {
     st.textContent = "request failed: " + e;
   } finally {
