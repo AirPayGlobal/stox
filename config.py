@@ -130,7 +130,7 @@ class Config:
 
     # ------------------------------------------------------------ Fib pullback
     FIB_BAR_MINUTES: int = _i("FIB_BAR_MINUTES", 1)         # 1-minute structure
-    FIB_PIVOT_K: int = _i("FIB_PIVOT_K", 3)                 # fractal half-width
+    FIB_PIVOT_K: int = _i("FIB_PIVOT_K", 2)                 # fractal half-width (lag)
     FIB_ENTRY_LOW: float = _f("FIB_ENTRY_LOW", 0.50)        # gold zone shallow edge
     FIB_ENTRY_HIGH: float = _f("FIB_ENTRY_HIGH", 0.618)     # gold zone deep edge
     FIB_MIN_RANGE_PCT: float = _f("FIB_MIN_RANGE_PCT", 0.0015)  # min leg size / spot

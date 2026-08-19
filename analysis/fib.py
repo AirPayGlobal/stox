@@ -83,6 +83,8 @@ def fib_signal(bars: pd.DataFrame) -> FibSignal | None:
         return None
 
     price = float(bars["close"].iloc[-1])
+    bar_low = float(bars["low"].iloc[-1])
+    bar_high = float(bars["high"].iloc[-1])
     lo = Config.FIB_ENTRY_LOW      # 0.5
     hi = Config.FIB_ENTRY_HIGH     # 0.618
 
@@ -94,7 +96,10 @@ def fib_signal(bars: pd.DataFrame) -> FibSignal | None:
         # Gold zone (retracement down from the high): [0.618, 0.5] of the leg.
         zone_lo = swing_hi - hi * rng      # deeper (0.618)
         zone_hi = swing_hi - lo * rng      # shallower (0.5)
-        if zone_lo <= price <= zone_hi:
+        # Enter on a TOUCH: the bar wicked into the zone (reached at least the
+        # 0.5 level) without breaking the stop, and closed still in the trend.
+        # A close-inside-the-band rule almost never fires on 1-min bars.
+        if bar_low <= zone_hi and bar_low > swing_lo and price > swing_lo:
             return FibSignal(
                 Signal.LONG, round(zone_lo, 2), round(zone_hi, 2),
                 stop=round(swing_lo, 2), target=round(swing_hi, 2),
@@ -109,7 +114,7 @@ def fib_signal(bars: pd.DataFrame) -> FibSignal | None:
         # Gold zone (retracement up from the low): [0.5, 0.618] of the leg.
         zone_lo = swing_lo + lo * rng      # shallower (0.5)
         zone_hi = swing_lo + hi * rng      # deeper (0.618)
-        if zone_lo <= price <= zone_hi:
+        if bar_high >= zone_lo and bar_high < swing_hi and price < swing_hi:
             return FibSignal(
                 Signal.SHORT, round(zone_lo, 2), round(zone_hi, 2),
                 stop=round(swing_hi, 2), target=round(swing_lo, 2),

@@ -65,5 +65,15 @@ def test_min_range_filter_blocks_tiny_legs(monkeypatch):
     assert fib_signal(bars(tiny)) is None
 
 
+def test_touch_entry_fires_on_wick_into_zone():
+    # Up-leg, then a bar whose LOW wicks into the gold zone (~104) but CLOSES
+    # back above it (~106). The old close-in-band rule missed this; the touch
+    # rule catches it.
+    df = bars(UP[:-1] + [106.0])
+    df.iloc[-1, df.columns.get_loc("low")] = 104.0   # wick down into the zone
+    sig = fib_signal(df)
+    assert sig is not None and sig.direction == Signal.LONG
+
+
 def test_too_few_bars():
     assert fib_signal(bars([100, 101, 102])) is None
