@@ -283,6 +283,14 @@ class TradingEngine:
         # Disaster backstop on premium (fills/gaps the level check can miss).
         if mark <= trade.stop_premium:
             return "SL"
+        # Fib time stop: a pullback trade that hasn't hit its level in this long
+        # has lost its momentum thesis — free the slot for the next setup.
+        if (
+            trade.strategy == "fib"
+            and Config.FIB_MAX_HOLD_MINUTES
+            and trade.minutes_open() >= Config.FIB_MAX_HOLD_MINUTES
+        ):
+            return "TIME"
         return None
 
     def _signal_reversed(self, trade) -> bool:
@@ -425,6 +433,7 @@ class TradingEngine:
     # ------------------------------------------------------------ Fib pullback
     def _scan_fib(self, underlying: str, equity: float) -> None:
         from analysis.fib import fib_signal
+        from analysis.fib import stop_distance_ok as fib_stop_ok
 
         bars = get_intraday_bars(underlying, minutes=Config.FIB_BAR_MINUTES, lookback_days=1)
         if bars.empty:
@@ -460,7 +469,7 @@ class TradingEngine:
         if blocked:
             logger.info(f"{underlying} fib entry blocked: {blocked}")
             return
-        if not stop_distance_ok(spot, sig.stop):
+        if not fib_stop_ok(spot, sig.stop):
             logger.info(
                 f"{underlying} fib skipped: stop distance {abs(spot - sig.stop):.2f} "
                 f"outside tradeable band (spot {spot:.2f})"

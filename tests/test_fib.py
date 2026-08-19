@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from analysis.fib import find_pivots, fib_signal
+from analysis.fib import find_pivots, fib_signal, stop_distance_ok
 from analysis.signals import Signal
 from config import Config
 
@@ -77,3 +77,36 @@ def test_touch_entry_fires_on_wick_into_zone():
 
 def test_too_few_bars():
     assert fib_signal(bars([100, 101, 102])) is None
+
+
+# --- The rewrite's whole point: the setup survives the pullback ---------------
+# Origin low @100 (idx3), impulse high @110 (idx7), then a pullback that itself
+# prints a pivot low @104 (idx10) inside the gold zone, then a bar still in the
+# zone. The OLD "last two pivots" rule saw L@10 as the newest pivot and flipped
+# the leg to a short; the swing-anchored rule keeps the long alive.
+PULLBACK = [103, 102, 101, 100, 102, 105, 108, 110, 108, 105, 104, 104.5, 104.8]
+
+
+def test_setup_survives_pullback_pivot():
+    piv = find_pivots(bars(PULLBACK), k=2)
+    kinds = [p.kind for p in piv]
+    assert kinds.count("L") >= 2 and "H" in kinds   # the pullback did print an L
+    sig = fib_signal(bars(PULLBACK))
+    assert sig is not None
+    assert sig.direction == Signal.LONG             # not flipped to SHORT
+    assert abs(sig.stop - 99.95) < 0.1              # anchored on the origin low
+    assert abs(sig.target - 110.05) < 0.1           # not the pullback low
+
+
+def test_invalidated_when_price_breaks_origin():
+    # Same structure but the last bar closes below the origin low — trend gone.
+    broken = PULLBACK[:-1] + [99.0]
+    assert fib_signal(bars(broken)) is None
+
+
+def test_stop_distance_band(monkeypatch):
+    monkeypatch.setattr(Config, "FIB_MIN_STOP_PCT", 0.001)   # >= $0.55 on $550
+    monkeypatch.setattr(Config, "FIB_MAX_STOP_PCT", 0.010)   # <= $5.50 on $550
+    assert stop_distance_ok(550.0, 548.0)    # $2.00 — in band
+    assert not stop_distance_ok(550.0, 549.9)  # $0.10 — too tight
+    assert not stop_distance_ok(550.0, 540.0)  # $10.0 — too wide
