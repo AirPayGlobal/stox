@@ -258,6 +258,49 @@ paper trial**, not real money. The `/api/compare` view is how we'll adjudicate.
 
 ---
 
+## 8b. Paper-trading validation upgrade (current)
+
+A validation harness now tests whether the fib backtest edge survives realistic
+execution and full production constraints. **It changes no live-trading
+behaviour** — it is measurement infrastructure.
+
+- **Engine-parity simulator** (`backtest/fib_sim.py`): replays fib with the same
+  constraints the live engine enforces — 5-minute scan cadence (closing the §5
+  gap between the old every-bar backtest and the live engine), account-level
+  daily governor (profit floor + max-loss halt), trade/concurrency caps across
+  both symbols, cooldowns, time stop, and end-of-day flatten.
+- **Execution scenarios** (`backtest/execution.py`): the single fixed \$0.02
+  half-spread is replaced by `baseline | optimistic | base | conservative | mid`
+  scenarios modelling spread, slippage, delayed fills, and unfilled/partial
+  fills. Deterministic. **Mid fills only under the explicit `mid` diagnostic.**
+- **Research-grade records + reports** (`backtest/validation.py`): every trade
+  records strategy version + config hash, contract bid/ask/spread/delta/DTE,
+  intended vs simulated fill + delay + outcome, exit reason, underlying & option
+  MFE/MAE, planned risk + realized R, and regime/time-of-day. Reports slice by
+  symbol, DTE, time-of-day, spread bucket, and regime; add tail-dependence
+  (median day, worst-5%, P&L ex best 1/3/5 days) and **walk-forward** folds with
+  frozen params; and compare all execution scenarios and every optional filter.
+- **Optional selectivity filters** (`analysis/fib_filters.py`): trend, vol
+  regime, time-of-day, liquidity, post-touch confirmation. **All default OFF**;
+  enabling one requires out-of-sample proof (see `docs/FIB_VALIDATION_REPORT.md`).
+- **Operational safeguards** (`trading/safeguards.py`): entries are blocked on
+  stale market data, in-flight/unresolved orders, reconciliation mismatch, or
+  unmanaged share positions, each surfaced as a dashboard warning; fib dedupe
+  keys persist per day so a restart cannot re-fire a traded signal.
+
+**Revised assumptions vs §6:** execution is no longer a single optimistic
+constant, and the backtest now applies the governor, caps, and 5-minute cadence
+it previously ignored — so `base`/`conservative` scenario results are far more
+representative than the prior upper-bound number.
+
+**Remaining limitations (unchanged or new):** option marks are still
+Black-Scholes (no real options chain, no true bid/ask, no IV surface); the
+modelled spread is a premium/DTE heuristic, not observed quotes; DTE is
+simulated per-run (0 vs 1) rather than chosen from a live chain; and results
+generated in a credential-less environment use **synthetic bars** and are
+labelled illustrative. Authoritative numbers require running the harness on real
+bars. See `docs/FIB_VALIDATION_REPORT.md`.
+
 ## 9. Repository map
 
 ```
@@ -272,8 +315,15 @@ analysis/
   indicators.py         ATR, RVOL, VWAP, RSI, etc.
 backtest/
   run_backtest.py       Per-day simulators (orb/sweep/swing/fib), stats, CLI + API entry
-  bs.py                 Black-Scholes pricer (simulated marks)
+  bs.py                 Black-Scholes pricer + delta (simulated marks)
   swing.py              4H multi-day sweep-reclaim simulator (backtest-only)
+  execution.py          Execution-cost scenarios (baseline/optimistic/base/conservative/mid)
+  fib_sim.py            Engine-parity fib simulator + research-grade trade records
+  validation.py         Scenario/slice/robustness/walk-forward reports + Markdown
+  regime.py             Trend / realized-vol / time-of-day classifiers
+  synth.py              Deterministic synthetic bars (offline tests + illustrative report)
+analysis/fib_filters.py Optional selectivity filters (all default OFF)
+trading/safeguards.py   Entry-block predicates + persisted restart-safe dedupe store
 trading/
   positions.py          PositionBook + Trade (planned_risk, realized_r, MFE/MAE), JSON persist
   risk.py               Daily governor, drawdown breaker, sizing, DayState persistence
@@ -302,9 +352,11 @@ Dockerfile, railway.toml  Deploy (shell-form CMD binds $PORT; healthcheck /healt
    ~$170 simulated edge/trade with $0.02 assumed half-spread, how much real
    0DTE/1DTE SPY & QQQ spread+slippage would flip it negative? Is this profile
    viable at all, or should we prefer fewer, higher-edge trades?
-2. **The 5-min scan vs 1-min signal mismatch (§5).** Should `SCAN_SECONDS` drop
-   to ~60 for fib? What does that do to fill quality vs the backtest's
-   every-bar assumption?
+2. **The 5-min scan vs 1-min signal mismatch (§5)** — now *modelled*: the
+   validation simulator evaluates entries at the live 5-minute cadence
+   (`FIB_SCAN_BARS`), so the backtest no longer overcounts touches. Open
+   question remains whether `SCAN_SECONDS` *should* drop to ~60 for fib, and
+   what that does to real fill quality — decide from the real-bar report.
 3. **Governor interaction (§6/§8).** The profit-protection floor clips exactly
    the monster days the P&L depends on. Is a trailing-floor governor even the
    right meta-strategy for a high-frequency, positive-expectancy grinder, or
