@@ -1,7 +1,13 @@
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from reporting import daily_report, period_report, trades_csv
+from reporting import (
+    daily_report,
+    live_vs_backtest,
+    period_report,
+    strategy_live_stats,
+    trades_csv,
+)
 from trading.positions import PositionBook
 
 ET = ZoneInfo("America/New_York")
@@ -66,6 +72,51 @@ def test_empty_periods(tmp_path):
     book = PositionBook(path=str(tmp_path / "trades.json"))
     assert period_report(book, 30)["trades"] == 0
     assert daily_report(book, "2020-01-01")["trades"] == 0
+
+
+def test_strategy_live_stats_filters_and_shapes(tmp_path):
+    s = strategy_live_stats(seeded_book(tmp_path), "sweep", days=7)
+    assert s["trades"] == 2                      # only the two sweep trades
+    assert s["total_pnl"] == 100.0               # +300 - 200
+    assert s["expectancy"] == 50.0               # 100 / 2
+    assert s["win_rate"] == 0.5
+    assert set(s["exit_reasons"]) == {"UL_TP", "UL_SL"}
+    # Field shape must match the backtester's _stats so the two render together.
+    for key in ("trades", "win_rate", "total_pnl", "avg_daily_pnl",
+                "best_day", "worst_day", "days_at_target", "exit_reasons"):
+        assert key in s
+
+
+def test_strategy_live_stats_empty(tmp_path):
+    assert strategy_live_stats(seeded_book(tmp_path), "fib", days=7) == {"trades": 0}
+
+
+def test_live_vs_backtest_collecting_below_min_sample():
+    live = {"trades": 5, "win_rate": 0.6, "expectancy": 40.0, "total_pnl": 200.0}
+    bt = {"trades": 60, "win_rate": 0.68, "total_pnl": 6000.0}
+    r = live_vs_backtest(live, bt, min_sample=20)
+    assert r["verdict"] == "collecting"
+    assert r["backtest"]["expectancy"] == 100.0   # injected on the sim side
+
+
+def test_live_vs_backtest_diverging_flags_the_sweep_failure():
+    live = {"trades": 30, "win_rate": 0.4, "expectancy": -25.0, "total_pnl": -750.0}
+    bt = {"trades": 60, "win_rate": 0.68, "total_pnl": 6000.0}
+    r = live_vs_backtest(live, bt, min_sample=20)
+    assert r["verdict"] == "diverging"
+    assert r["expectancy_ratio"] < 0
+
+
+def test_live_vs_backtest_tracking_and_underperforming():
+    bt = {"trades": 60, "win_rate": 0.68, "total_pnl": 6000.0}  # sim expectancy 100
+    tracking = live_vs_backtest(
+        {"trades": 30, "win_rate": 0.62, "expectancy": 80.0, "total_pnl": 2400.0}, bt
+    )
+    assert tracking["verdict"] == "tracking"
+    under = live_vs_backtest(
+        {"trades": 30, "win_rate": 0.5, "expectancy": 20.0, "total_pnl": 600.0}, bt
+    )
+    assert under["verdict"] == "underperforming"
 
 
 def test_csv_export(tmp_path):

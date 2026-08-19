@@ -201,6 +201,40 @@ def api_backtest(
         return {"error": str(exc)}
 
 
+@app.get("/api/compare")
+def api_compare(
+    strategy: str = "",
+    days: int = 30,
+    equity: float = 100_000.0,
+    _: str = Depends(_auth),
+):
+    """Live-vs-backtest drift for one strategy over the same window: run the
+    same strategy through the backtester and lay its (upper-bound) stats beside
+    the live trade record, then classify the drift. This is the check that
+    exposed sweep — a strong backtest that bled once real spreads bit."""
+    strategy = strategy or Config.STRATEGY
+    if strategy not in ("orb", "sweep", "swing", "fib"):
+        return {"error": f"unknown strategy '{strategy}'"}
+    days = max(5, min(days, 365))
+    from reporting import live_vs_backtest, strategy_live_stats
+
+    live = strategy_live_stats(_book(), strategy, days)
+    from backtest.run_backtest import run_backtest
+
+    try:
+        res = run_backtest(Config.UNDERLYINGS, days, equity, strategy)
+        backtest = res["strategies"].get(strategy, {"trades": 0})
+    except Exception as exc:
+        logger.error(f"Compare backtest failed: {exc}", exc_info=True)
+        return {"error": str(exc)}
+    return {
+        "strategy": strategy,
+        "days": days,
+        "equity": equity,
+        **live_vs_backtest(live, backtest),
+    }
+
+
 @app.post("/api/reset-day")
 def api_reset_day(_: str = Depends(_auth)):
     """Clear the day's governor state and rebaseline the drawdown breaker —
