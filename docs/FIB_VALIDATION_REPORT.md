@@ -8,6 +8,11 @@
 > require re-running the harness on real SPY/QQQ bars — see §6. Every result here
 > is **simulated** (Black-Scholes option marks); none is live performance, and
 > no profitability claim is made.
+>
+> **Why not real bars here:** the environment that produced this report has no
+> Alpaca market-data credentials and the `alpaca` client is not installed, so a
+> real-bar run is not possible in it. The §6 command must be run where those
+> credentials exist. Nothing in this report was fabricated to fill that gap.
 
 ## 1. Purpose
 
@@ -87,6 +92,65 @@ expectancy (\$62 → \$69) while cutting trades; `trend` and `confirm` cut trade
 and *reduced* expectancy here; `vol_regime` and `time_of_day` were no-ops because
 their bands default to wide-open (they require explicit parameters to bite). **No
 filter earned "enable" on this run.**
+
+## 4b. Impact of each proposed switch (ILLUSTRATIVE / SYNTHETIC)
+
+All switches are **left unchanged**; these are comparison-only runs on the same
+90-session synthetic set. `base` = realistic central execution, `conservative` =
+stress execution.
+
+**Execution (the dominant factor):**
+
+| Scenario | Trades | Win% | Total | Exp/trade | Median day | MaxDD |
+|---|---|---|---|---|---|---|
+| base | 780 | 45% | +\$48,031 | +\$62 | +\$404 | \$9,708 |
+| **conservative** | 669 | 40% | **−\$38,130** | **−\$57** | **−\$872** | \$46,732 |
+
+Under stressed fills the illustrative edge **flips negative** — the headline
+caution.
+
+**Switch 1 — `MAX_SPREAD_PCT` 0.10 → 0.05 (comparison only; kept at 0.10):**
+
+| | Trades | Total | Exp/trade |
+|---|---|---|---|
+| base, spread ≤ 0.10 (current) | 780 | +\$48,031 | +\$62 |
+| base, spread ≤ 0.05 (proposed) | **0** | — | — |
+| conservative, spread ≤ 0.05 | **0** | — | — |
+
+On synthetic bars a 0.05 cap rejects **every** trade (synthetic 0DTE premiums
+are cheap, so their modelled spread% mostly exceeds 5%). This is a synthetic
+artifact, but it carries a real warning: **a tight spread cap can starve the
+strategy**, and its true effect is only measurable against real SPY/QQQ quote
+spreads. Recommendation stands: **keep 0.10**, re-measure 0.05 on real bars.
+
+**Switch 2 — scan cadence 5-min → 1-min (comparison only; kept at 5-min):**
+
+| | Trades | Total | Exp/trade | MaxDD |
+|---|---|---|---|---|
+| base, 5-min (current) | 780 | +\$48,031 | +\$62 | \$9,708 |
+| base, 1-min (proposed) | 912 | +\$76,774 | +\$84 | \$5,225 |
+| conservative, 5-min | 669 | −\$38,130 | −\$57 | \$46,732 |
+| conservative, 1-min | 800 | −\$23,804 | −\$30 | \$48,549 |
+
+1-min scanning improved the synthetic metrics (more trades, higher expectancy,
+lower base drawdown) but did **not** rescue the conservative case. Per
+instruction the cadence **stays at 5-min** until the real-bar run confirms the
+parity assumptions — synthetic random-walk data is exactly where higher
+sampling frequency can flatter a result.
+
+**Switch 3 — optional filters, each alone (all kept OFF):**
+
+| Filter | base Exp/trade | base MaxDD | conservative Exp/trade | conservative MaxDD |
+|---|---|---|---|---|
+| none | +\$62 | \$9,708 | −\$57 | \$46,732 |
+| trend | +\$41 | \$5,782 | −\$45 | \$29,748 |
+| confirm | +\$27 | \$7,509 | −\$95 | \$52,570 |
+| liquidity | +\$69 | \$9,399 | — (0 trades) | — |
+
+`trend` cuts drawdown in both cases but lowers base expectancy and stays
+negative under stress; `confirm` hurts; `liquidity` marginally helps base but
+starves the conservative case. **No filter earns "enable" on this run** — none
+turns the stressed case positive.
 
 ## 5. Decision rule (how we will read the real report)
 
