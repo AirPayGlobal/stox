@@ -1,200 +1,149 @@
 # Fib Gold-Zone Pullback — Validation Report
 
-> **STATUS: framework + SYNTHETIC illustrative pass. NOT a live result and NOT
-> a validation of a real edge.** The numbers in §4 were produced on
-> deterministic *synthetic* bars (a seeded random walk) because the environment
-> that generated this report had no market-data credentials. They exist only to
-> exercise the machinery and illustrate the decision rule. Authoritative numbers
-> require re-running the harness on real SPY/QQQ bars — see §6. Every result here
-> is **simulated** (Black-Scholes option marks); none is live performance, and
-> no profitability claim is made.
->
-> **Why not real bars here:** the environment that produced this report has no
-> Alpaca market-data credentials and the `alpaca` client is not installed, so a
-> real-bar run is not possible in it. The §6 command must be run where those
-> credentials exist. Nothing in this report was fabricated to fill that gap.
+> **STATUS: REAL-BAR validation complete. Result is NEGATIVE.** Option marks are
+> still Black-Scholes (simulated), but the bars are real SPY/QQQ 1-minute data
+> (138 sessions, 2026-02-02 … 2026-08-19) and the run enforces full engine
+> parity. Every result is **simulated fills on real bars**, not live
+> performance. No profitability claim is made — the finding is that the prior
+> positive backtest does **not** survive realistic execution and production
+> constraints.
 
 ## 1. Purpose
 
 Establish whether the Fib strategy's backtest edge survives **realistic
 execution friction** and **full production constraints**, before any decision to
-commit capital. This directly answers the review concern that the strategy's
-prior backtest (a) evaluated every 1-minute bar while the live engine scans every
-5 minutes, (b) assumed a single fixed \$0.02 half-spread, (c) omitted the daily
-governor and other production limits, and (d) leaned on a few exceptional days.
+commit capital. This answers the review concern that the prior backtest (a)
+evaluated every 1-minute bar while the live engine scans every 5 minutes, (b)
+assumed a single fixed \$0.02 half-spread, (c) omitted the daily governor and
+other production limits, and (d) leaned on a few exceptional days.
 
-## 2. What changed (method)
+## 2. Method — engine parity
 
-The validation harness (`backtest/fib_sim.py`, `backtest/validation.py`) runs the
-Fib strategy under **engine parity**:
+The harness (`backtest/fib_sim.py`, `backtest/validation.py`) runs Fib under the
+same constraints the live engine enforces: 5-minute scan cadence, completed-bar
+signals, account-level daily governor (profit floor + max-loss halt), trade and
+concurrency caps across both symbols, cooldowns, the time stop, and end-of-day
+flatten. Execution friction is modelled by named scenarios
+(`backtest/execution.py`): spread, slippage, delayed fills, and unfilled/partial
+fills. **Mid-price fills are never used** except the explicit `mid` diagnostic.
 
-- **Scan-cadence parity** — entries evaluated every `FIB_SCAN_BARS` bars (5 by
-  default = the live 5-minute cadence), not every bar.
-- **Completed-bar logic** — the decision at a scan bar uses only bars up to it.
-- **Account-level daily governor** — profit-protection floor, daily max-loss
-  halt, `MAX_TRADES_PER_DAY`, `MAX_CONCURRENT_POSITIONS` across *both* symbols,
-  per-symbol cooldowns and consecutive-loss cutoff, the `FIB_MAX_HOLD_MINUTES`
-  time stop, and the `FLATTEN_TIME` end-of-day flatten.
-- **Realistic execution** — the single fixed spread is replaced by named
-  scenarios (`backtest/execution.py`) modelling bid/ask spread, slippage,
-  delayed fills, and unfilled/partial fills. Deterministic (seeded per order).
-  **Mid-price fills are never used** except the explicit `mid` diagnostic.
-
-All new behaviour is config-driven and defaults to production-safe settings. The
-optional selectivity filters (§5) all default **OFF**.
+Run: `python -m backtest.validation --days 200 --equity 100000` (real bars).
+Switches were **left unchanged** for the primary run (all `FIB_FILTER_*` OFF,
+`MAX_SPREAD_PCT` 0.10, cadence 5-min). config_hash `80c3ab582c52`.
 
 ## 3. Execution scenarios
 
 | Scenario | Spread crossed | Slippage | Delay | No-fill / partial | Purpose |
 |---|---|---|---|---|---|
-| `baseline` | flat \$0.02/side | none | none | never | reproduce the *old* assumption for comparison |
+| `baseline` | flat \$0.02/side | none | none | never | reproduce the *old* assumption |
 | `optimistic` | ½ modelled spread | none | none | never | best plausible fills |
 | `base` | full ½-spread | \$0.01 | 1 bar | ~3% / 5% | realistic central estimate |
 | `conservative` | full ½-spread | \$0.03 | 1 bar | ~8% / 10% | stress case |
-| `mid` | none (fills at mid) | none | none | never | **diagnostic only** |
+| `mid` | none (fills at mid) | — | — | — | **diagnostic only** |
 
-The modelled spread widens for cheaper contracts (a \$0.20 option is
-proportionally wider than a \$5 option), which is where 0DTE friction bites most.
-
-## 4. Illustrative results — SYNTHETIC DATA (90 sessions, SPY+QQQ, \$100k)
-
-> Reminder: synthetic random-walk bars. Read the **shape**, not the magnitudes.
+## 4. Results — REAL BARS (138 sessions, SPY+QQQ, \$100k)
 
 **Execution-scenario comparison (base strategy, filters off):**
 
 | | Trades | Win% | Total P&L | Exp/trade | Median day | MaxDD |
 |---|---|---|---|---|---|---|
-| baseline | 825 | 50% | \$118,188 | \$143 | \$1,066 | \$3,576 |
-| optimistic | 832 | 51% | \$142,298 | \$171 | \$1,256 | \$1,915 |
-| base | 780 | 45% | \$48,031 | \$62 | \$404 | \$9,708 |
-| conservative | 669 | 40% | −\$38,130 | −\$57 | −\$872 | \$46,732 |
+| baseline (old \$0.02 assumption) | 1055 | 41% | +\$42,092 | +\$40 | −\$12 | \$11,272 |
+| optimistic | 1077 | 42% | +\$100,823 | +\$94 | +\$422 | \$7,759 |
+| **base (realistic)** | 1003 | 37% | **−\$30,775** | **−\$31** | −\$658 | \$42,289 |
+| **conservative (stress)** | 856 | 31% | **−\$133,803** | **−\$156** | −\$1,580 | \$136,593 |
 
-**The single most important finding is structural, not numerical:** moving from
-the old fixed-spread assumption (`baseline`) to a realistic (`base`) and then
-stressed (`conservative`) execution model collapses a large positive result to
-roughly breakeven and then to a loss. A thin-edge, high-frequency profile is
-**dominated by execution assumptions** — exactly the review's concern.
+**Two findings, and the first does not depend on the friction model:**
 
-**Tail dependence (base):** single best day ≈ 9% of total; P&L excluding the best
-5 days still positive on synthetic data. (The real question is whether that holds
-on real bars, where the prior study showed one day = up to 53% of a month.)
+1. **Engine parity alone gutted the edge.** Under the *same* old \$0.02-spread
+   assumption, applying the 5-minute cadence + governor + caps on real bars gives
+   **+\$40/trade at 41% win** — versus the ~+\$169/trade the prior every-bar,
+   no-governor backtester reported. Most of the original number was cadence
+   overcount and un-modelled constraints, not edge.
+2. **Realistic friction flips it negative.** `base` = **−\$31/trade**,
+   `conservative` = **−\$156/trade**. Only the optimistic-fill assumption stays
+   positive.
 
 **Walk-forward (frozen params, 4 contiguous unseen folds, base):** expectancy per
-trade drifts \$139 → \$99 → −\$25 → \$27 across folds — i.e. **not stable** even
-on synthetic data. Stability across unseen periods is the bar; this run does not
-clear it.
+trade **+\$15 → −\$32 → −\$56 → −\$60** — negative in three of four folds and
+deteriorating. Fails the stability bar.
 
-**0DTE vs 1DTE (base):** 0DTE ≈ +\$48k vs 1DTE ≈ −\$67k on synthetic bars —
-consistent with 1DTE carrying more premium/vega risk for this hold horizon.
+**Tail dependence (base):** total −\$30,775; removing the best 1/3/5 days makes it
+*worse* (−\$36k / −\$47k / −\$54k). This is not a few-good-days story — it is a
+broad, persistent loss.
 
-**Filter effects (each alone vs none, base):** `liquidity` marginally improved
-expectancy (\$62 → \$69) while cutting trades; `trend` and `confirm` cut trades
-and *reduced* expectancy here; `vol_regime` and `time_of_day` were no-ops because
-their bands default to wide-open (they require explicit parameters to bite). **No
-filter earned "enable" on this run.**
+**0DTE vs 1DTE (base):** 0DTE −\$31/trade; **1DTE −\$174/trade** — far worse.
 
-## 4b. Impact of each proposed switch (ILLUSTRATIVE / SYNTHETIC)
+**Slices (base) — where the losses concentrate:**
 
-All switches are **left unchanged**; these are comparison-only runs on the same
-90-session synthetic set. `base` = realistic central execution, `conservative` =
-stress execution.
+| Dimension | Least bad | Worst |
+|---|---|---|
+| Time of day | morning **+\$33/trade** (only positive bucket) | afternoon −\$126 |
+| Volatility | high-vol **+\$60/trade** | low-vol −\$99 |
+| Trend regime | up +\$10 | flat −\$124 |
+| Symbol | SPY −\$11 | QQQ −\$50 |
+| Spread bucket | medium(5-10%) −\$10 | wide(≥10%) −\$146 |
 
-**Execution (the dominant factor):**
+## 4b. Impact of each proposed switch (real bars; nothing changed)
 
-| Scenario | Trades | Win% | Total | Exp/trade | Median day | MaxDD |
-|---|---|---|---|---|---|---|
-| base | 780 | 45% | +\$48,031 | +\$62 | +\$404 | \$9,708 |
-| **conservative** | 669 | 40% | **−\$38,130** | **−\$57** | **−\$872** | \$46,732 |
+**Switch 1 — `MAX_SPREAD_PCT` 0.10 → 0.05:** produces **0 trades** in the
+simulator. ⚠ This is a **modelling artifact, not a result**: the sim's entry
+spread% is the *scenario's assumption* (≥6% of premium in `base`), not a real
+quote, so a 5% cap rejects everything. `MAX_SPREAD_PCT` gates on *live* quotes,
+which this harness does not have. **Inconclusive — keep 0.10; the real 0.05
+question needs live quote data.**
 
-Under stressed fills the illustrative edge **flips negative** — the headline
-caution.
+**Switch 2 — scan cadence 5-min → 1-min:** base −\$30,775 → −\$19,544 (still
+negative); conservative −\$133,803 → −\$159,032 (worse). 1-min does not rescue
+the strategy. **Keep 5-min.**
 
-**Switch 1 — `MAX_SPREAD_PCT` 0.10 → 0.05 (comparison only; kept at 0.10):**
+**Switch 3 — optional filters, each alone (base / conservative expectancy):**
 
-| | Trades | Total | Exp/trade |
+| Filter | base Exp | base MaxDD | conservative Exp |
 |---|---|---|---|
-| base, spread ≤ 0.10 (current) | 780 | +\$48,031 | +\$62 |
-| base, spread ≤ 0.05 (proposed) | **0** | — | — |
-| conservative, spread ≤ 0.05 | **0** | — | — |
+| none | −\$31 | \$42,289 | −\$156 |
+| trend | −\$50 | \$40,940 | −\$195 |
+| confirm | −\$57 | \$57,206 | −\$191 |
+| liquidity | **−\$3** | **\$26,342** | 0 trades |
 
-On synthetic bars a 0.05 cap rejects **every** trade (synthetic 0DTE premiums
-are cheap, so their modelled spread% mostly exceeds 5%). This is a synthetic
-artifact, but it carries a real warning: **a tight spread cap can starve the
-strategy**, and its true effect is only measurable against real SPY/QQQ quote
-spreads. Recommendation stands: **keep 0.10**, re-measure 0.05 on real bars.
+`liquidity` is the only filter that materially helps — it lifts `base` to roughly
+**breakeven** (−\$3/trade) and cuts drawdown ~38% — but it does **not** make the
+strategy positive, and it starves the conservative case entirely. **No filter
+earns "enable."**
 
-**Switch 2 — scan cadence 5-min → 1-min (comparison only; kept at 5-min):**
+## 5. Decision rule (as stated before the run)
 
-| | Trades | Total | Exp/trade | MaxDD |
-|---|---|---|---|---|
-| base, 5-min (current) | 780 | +\$48,031 | +\$62 | \$9,708 |
-| base, 1-min (proposed) | 912 | +\$76,774 | +\$84 | \$5,225 |
-| conservative, 5-min | 669 | −\$38,130 | −\$57 | \$46,732 |
-| conservative, 1-min | 800 | −\$23,804 | −\$30 | \$48,549 |
+> Retire if `base` ≤ 0, or only `optimistic` is positive, or the edge does not
+> survive the walk-forward folds.
 
-1-min scanning improved the synthetic metrics (more trades, higher expectancy,
-lower base drawdown) but did **not** rescue the conservative case. Per
-instruction the cadence **stays at 5-min** until the real-bar run confirms the
-parity assumptions — synthetic random-walk data is exactly where higher
-sampling frequency can flatter a result.
+All three retirement conditions are met: `base` is negative, only `optimistic`
+is positive, and the walk-forward folds are negative and deteriorating.
 
-**Switch 3 — optional filters, each alone (all kept OFF):**
+## 6. Recommendation
 
-| Filter | base Exp/trade | base MaxDD | conservative Exp/trade | conservative MaxDD |
-|---|---|---|---|---|
-| none | +\$62 | \$9,708 | −\$57 | \$46,732 |
-| trend | +\$41 | \$5,782 | −\$45 | \$29,748 |
-| confirm | +\$27 | \$7,509 | −\$95 | \$52,570 |
-| liquidity | +\$69 | \$9,399 | — (0 trades) | — |
+**RETIRE the strategy as configured. Do not proceed toward capital, and do not
+enable any switch.** The prior +\$132k/120-day backtest was an artifact of (1)
+evaluating every 1-minute bar instead of the live 5-minute cadence, (2) omitting
+the governor/caps, and (3) an optimistic fixed spread. Corrected for all three on
+real bars, the edge is negative and unstable across time.
 
-`trend` cuts drawdown in both cases but lowers base expectancy and stays
-negative under stress; `confirm` hurts; `liquidity` marginally helps base but
-starves the conservative case. **No filter earns "enable" on this run** — none
-turns the stressed case positive.
+**Honest caveats on magnitude (not direction):** option marks are Black-Scholes,
+not a real options chain; the execution spread is a premium-based heuristic, not
+observed quotes; so the *size* of the loss is model-dependent. But the direction
+is robust — even the old assumption yields only +\$40/trade, and the walk-forward
+degrades regardless.
 
-## 5. Decision rule (how we will read the real report)
+**If any further work is authorised, it should be treated as a NEW hypothesis,
+not a rescue of this one.** The slices hint at a narrower setup (morning-only,
+higher-volatility, SPY, with the liquidity filter) that is *less* bad — but
+selecting on those post-hoc is exactly the curve-fitting the validation standard
+forbids. Any such variant must be pre-registered and validated on its own
+out-of-sample folds with a real quote/liquidity model before it means anything.
+I would not bank on it.
 
-A filter or the strategy itself is judged on **out-of-sample expectancy and
-drawdown**, never on total P&L alone:
+**Decisions for the owner:**
+1. Confirm retire (turn `STRATEGY` off / set `ENGINE_AUTOSTART_DRY=true` so the
+   engine runs signals-only while a replacement is designed), **or**
+2. Authorise a scoped, pre-registered re-test of the narrower setup above with a
+   real quote model — as new research, not a continuation.
 
-- **Continue paper testing** if, on real bars, the `base` scenario keeps a
-  positive per-trade expectancy that survives the walk-forward folds *and* the
-  removal of the best 3–5 days, and `conservative` is not catastrophic.
-- **Revise** (tighten `MAX_SPREAD_PCT`/liquidity filter, cut frequency, restrict
-  regimes/ToD) if `base` is marginal and a *specific* filter improves OOS
-  expectancy and drawdown on unseen folds.
-- **Retire** if `base` is ≤ 0 or only `optimistic` is positive, or the edge does
-  not survive the walk-forward folds.
-
-## 6. How to produce the authoritative numbers
-
-In an environment with Alpaca market-data credentials:
-
-```bash
-python -m backtest.validation --days 120 --equity 100000        # real bars
-python -m backtest.validation --days 120 --synthetic            # this illustrative run
-```
-
-The real run prints the same tables under a "SIMULATED fills on real bars"
-header. Compare `base`/`conservative` to `baseline`, check the walk-forward
-folds, and apply §5.
-
-## 7. Recommendation
-
-**Provisional: CONTINUE PAPER TESTING — do not commit capital, do not enable any
-optional filter yet.** The harness demonstrates the strategy is highly sensitive
-to execution assumptions and that its edge is not obviously stable across unseen
-windows (on synthetic data it is not). That is a caution flag, not a verdict.
-
-The next gate is a **real-bar run of this harness** (§6) plus **live paper trades**
-compared against it via the existing `/api/compare` view. Concretely:
-
-1. Run the real-bar validation; read `base` vs `conservative` and the folds.
-2. Collect ≥ 20–30 live paper fib trades; confirm the live fill quality matches
-   the `base` scenario's assumptions (spread %, delay, fill rate) — if real fills
-   look more like `conservative`, weight that scenario.
-3. Only if `base` survives §5 on both fronts should sizing or capital be discussed.
-
-Decisions requiring sign-off before flipping any switch: enabling any
-`FIB_FILTER_*`, tightening `MAX_SPREAD_PCT`, or changing `FIB_SCAN_BARS`. None are
-enabled by this work.
+No PR has been opened. No switch has been changed.
