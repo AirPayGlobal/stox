@@ -88,16 +88,25 @@ _RECORDS: list[StrategyRecord] = [
         id="ETF_TREND_V1", name="Diversified ETF time-series momentum / trend",
         version="v1", lifecycle="REGISTERED", asset_class="etf", cadence="weekly",
         rationale="Persistent medium-term trends across distinct liquid markets; long/cash.",
-        status_reason="Spec pre-registered; awaiting implementation and out-of-sample test.",
-        evidence="docs/strategies/ETF_TREND_V1.md", data_ready="partial",
+        status_reason=(
+            "Backtested on real bars 2016-2026: positive after costs (base ~5.6% CAGR, "
+            "Sharpe 0.89, MaxDD ~11%) but does NOT beat SPY buy-and-hold on this sample "
+            "(the pre-stated benchmark gate). Sample omits 2008-09 crisis where trend "
+            "earns its edge; Deflated-Sharpe not yet computed. Not advanced to tradeable."
+        ),
+        evidence="docs/ETF_STRATEGY_VALIDATION_REPORT.md", data_ready="partial",
         eligible_profiles=("paper_500", "paper_2500", "paper_10000", "paper_50000"),
     ),
     StrategyRecord(
         id="ETF_RELATIVE_MOMENTUM_V1", name="ETF cross-sectional momentum / relative strength",
         version="v1", lifecycle="REGISTERED", asset_class="etf", cadence="monthly",
         rationale="Hold the strongest liquid segments, gated by positive absolute momentum.",
-        status_reason="Spec pre-registered; awaiting implementation and out-of-sample test.",
-        evidence="docs/strategies/ETF_RELATIVE_MOMENTUM_V1.md", data_ready="partial",
+        status_reason=(
+            "Backtested on real bars 2016-2026: positive after costs (~6% CAGR, Sharpe "
+            "0.75) but below SPY buy-and-hold and weaker than the trend sleeve; correlated "
+            "with trend so adds little diversification. Not advanced to tradeable."
+        ),
+        evidence="docs/ETF_STRATEGY_VALIDATION_REPORT.md", data_ready="partial",
         eligible_profiles=("paper_500", "paper_2500", "paper_10000", "paper_50000"),
     ),
 ]
