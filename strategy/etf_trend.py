@@ -22,6 +22,7 @@ from strategy.momentum import (
 
 STRATEGY_ID = "ETF_TREND_V1"
 VERSION = "v1"
+CADENCE = "weekly"
 
 DEFAULTS = {
     "lookbacks": (21, 63, 126, 252),

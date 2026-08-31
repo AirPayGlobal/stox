@@ -24,6 +24,7 @@ from strategy.momentum import (
 
 STRATEGY_ID = "ETF_RELATIVE_MOMENTUM_V1"
 VERSION = "v1"
+CADENCE = "monthly"
 
 DEFAULTS = {
     "universe": ("SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "GLD", "DBC"),
