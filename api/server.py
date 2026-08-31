@@ -52,15 +52,29 @@ def _start_engine(dry_run: bool = False) -> tuple[bool, str]:
 
 @app.on_event("startup")
 def _autostart() -> None:
-    """Default state is RUNNING: start the engine when the server boots."""
+    """Start the engine when the server boots — but NEVER auto-trade a retired
+    strategy. The multi-strategy migration (Phase 0) removes the old
+    single-default-strategy auto-trade path: if the configured STRATEGY is
+    retired (all current single strategies are), boot SIGNALS-ONLY so the
+    dashboard still works but no orders are placed until a validated strategy
+    or portfolio is selected."""
+    from strategy.registry import is_retired
+
     if not Config.ENGINE_AUTOSTART:
         logger.info("ENGINE_AUTOSTART=false — waiting for manual start")
         return
     if not Config.ALPACA_API_KEY or not Config.ALPACA_API_SECRET:
         logger.warning("Autostart skipped: Alpaca API keys not configured")
         return
-    ok, msg = _start_engine(dry_run=Config.ENGINE_AUTOSTART_DRY)
-    logger.info(f"Engine autostart: {msg} (dry_run={Config.ENGINE_AUTOSTART_DRY})")
+    dry = Config.ENGINE_AUTOSTART_DRY
+    if is_retired(Config.STRATEGY):
+        logger.warning(
+            f"STRATEGY '{Config.STRATEGY}' is RETIRED — auto-starting SIGNALS-ONLY "
+            f"(no orders). Select a validated strategy/portfolio to trade."
+        )
+        dry = True
+    ok, msg = _start_engine(dry_run=dry)
+    logger.info(f"Engine autostart: {msg} (dry_run={dry})")
 
 
 def _unauthorized() -> HTTPException:
@@ -135,10 +149,27 @@ def api_trades(_: str = Depends(_auth)):
 
 @app.post("/api/start")
 def api_start(dry_run: bool = False, _: str = Depends(_auth)):
+    from strategy.registry import is_retired
+
+    # A retired strategy may be observed (signals-only) but never live-traded.
+    if not dry_run and is_retired(Config.STRATEGY):
+        msg = (f"STRATEGY '{Config.STRATEGY}' is RETIRED — refusing live start. "
+               f"Use dry_run=true for signals-only, or select a validated strategy.")
+        logger.warning(msg)
+        return {"ok": False, "message": msg, "dry_run": dry_run}
     ok, message = _start_engine(dry_run=dry_run)
     if ok:
         logger.info(f"Engine started via API (dry_run={dry_run})")
     return {"ok": ok, "message": message, "dry_run": dry_run}
+
+
+@app.get("/api/strategies")
+def api_strategies(_: str = Depends(_auth)):
+    """Strategy registry (lifecycle, retirement reasons, data readiness) — feeds
+    the Strategy Registry UI."""
+    from strategy.registry import as_dicts
+
+    return {"strategies": as_dicts()}
 
 
 def _book():
