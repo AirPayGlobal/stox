@@ -172,6 +172,45 @@ def api_strategies(_: str = Depends(_auth)):
     return {"strategies": as_dicts()}
 
 
+# ---- Multi-strategy UI/API contracts (blueprint §8; PAPER-only) ----
+@app.get("/api/portfolio/profiles")
+def api_portfolio_profiles(_: str = Depends(_auth)):
+    from portfolio.contracts import profiles_contract
+
+    return profiles_contract()
+
+
+@app.get("/api/portfolio/command-centre")
+def api_command_centre(profile: str = "paper_10000", _: str = Depends(_auth)):
+    from portfolio.contracts import command_centre
+
+    try:
+        return command_centre(profile)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/api/portfolio/registry")
+def api_portfolio_registry(_: str = Depends(_auth)):
+    from portfolio.contracts import strategy_registry_contract
+
+    return strategy_registry_contract()
+
+
+@app.get("/api/portfolio/lab")
+def api_portfolio_lab(_: str = Depends(_auth)):
+    from portfolio.contracts import portfolio_lab_contract
+
+    return portfolio_lab_contract()
+
+
+@app.get("/api/research/leaderboard")
+def api_research_leaderboard(_: str = Depends(_auth)):
+    from portfolio.contracts import research_leaderboard_contract
+
+    return research_leaderboard_contract()
+
+
 def _book():
     """Engine's live book when running, else the persisted book from disk."""
     if _engine is not None:
