@@ -63,9 +63,14 @@ def test_walk_forward_folds():
 
 def test_run_strategy_validation_and_render():
     bars = _universe()
-    profiles = [get_profile("paper_10000")]
+    profiles = [get_profile("paper_10000"), get_profile("paper_2500")]
     v = run_strategy_validation(bars, profiles, [Sleeve(trend)], synthetic=True)
     md = render_markdown(v)
     assert "Execution scenarios" in md and "Benchmarks" in md and "Walk-forward" in md
+    assert "Deflated Sharpe" in md
     assert v["profiles"][0]["scenarios"]["conservative"]["final_equity"] <= \
            v["profiles"][0]["scenarios"]["ideal"]["final_equity"]
+    # DSR present, a probability in [0,1], and never above the undeflated PSR.
+    d = v["profiles"][0]["deflated_sharpe"]
+    assert d is None or (0.0 <= d["dsr"] <= d["psr_vs_zero"] <= 1.0)
+    assert v["n_trials"] >= 2

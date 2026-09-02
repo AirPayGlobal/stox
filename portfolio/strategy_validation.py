@@ -76,13 +76,21 @@ def walk_forward(equity: pd.Series, folds: int = 4) -> list:
     return out
 
 
-def validate_profile(bars: dict, profile, sleeves: list) -> dict:
-    scen = {s: metrics_from_equity(run_portfolio_backtest(bars, profile, sleeves, s).equity)
+def _profile_runs(bars: dict, profile, sleeves: list) -> dict:
+    return {s: run_portfolio_backtest(bars, profile, sleeves, s)
             for s in ("ideal", "base", "conservative")}
-    base = run_portfolio_backtest(bars, profile, sleeves, "base")
+
+
+def validate_profile(bars: dict, profile, sleeves: list, runs: dict | None = None,
+                     trial_sharpes: list | None = None) -> dict:
+    from portfolio.research_stats import deflated_sharpe_ratio
+
+    runs = runs or _profile_runs(bars, profile, sleeves)
+    scen = {s: metrics_from_equity(r.equity) for s, r in runs.items()}
+    base = runs["base"]
     spy = metrics_from_equity(buy_hold_equity(bars["SPY"], profile.capital)) if "SPY" in bars else {}
     cash = {"cagr": 0.0, "sharpe": 0.0, "max_drawdown": 0.0, "final_equity": profile.capital}
-    return {
+    out = {
         "profile": profile.id, "capital": profile.capital,
         "scenarios": scen,
         "walk_forward_base": walk_forward(base.equity),
@@ -90,14 +98,26 @@ def validate_profile(bars: dict, profile, sleeves: list) -> dict:
         "benchmarks": {"SPY_buy_hold": spy, "cash": cash},
         "n_rebalances": base.n_rebalances, "n_fills": base.n_fills,
     }
+    if trial_sharpes is not None:
+        out["deflated_sharpe"] = deflated_sharpe_ratio(base.daily_returns(), trial_sharpes)
+    return out
 
 
 def run_strategy_validation(bars: dict, profiles: list, sleeves: list,
                             synthetic: bool = False) -> dict:
+    from portfolio.research_stats import per_period_sharpe
+
+    # Run each (profile, scenario) backtest once; the family of per-period
+    # Sharpes across them is the multiple-testing trial set for deflation.
+    per_profile = {p.id: _profile_runs(bars, p, sleeves) for p in profiles}
+    trials = [sr for runs in per_profile.values() for r in runs.values()
+              if (sr := per_period_sharpe(r.daily_returns())) is not None]
     return {
         "synthetic": synthetic,
         "sleeves": [s.strategy_id for s in sleeves],
-        "profiles": [validate_profile(bars, p, sleeves) for p in profiles],
+        "n_trials": len(trials),
+        "profiles": [validate_profile(bars, p, sleeves, per_profile[p.id], trials)
+                     for p in profiles],
     }
 
 
@@ -132,6 +152,14 @@ def render_markdown(v: dict) -> str:
         L.append(_H)
         for w in pr["walk_forward_base"]:
             L.append(_mrow(w.get("window", "?"), w))
+        d = pr.get("deflated_sharpe")
+        if d:
+            verdict = "PASS" if d["dsr"] >= 0.95 else "FAIL"
+            L.append(f"\n### Deflated Sharpe (base, gate 7)\n"
+                     f"- DSR **{d['dsr']:.2f}** (P true Sharpe > multiple-testing threshold) "
+                     f"[{verdict} at 0.95] · vs-zero PSR {d['psr_vs_zero']:.2f} · "
+                     f"deflated threshold {d['sr0_annual']:.2f} annual Sharpe · "
+                     f"{d['n_trials']} trials\n")
         t = pr["tail_base"]
         if t:
             L.append(f"\n### Tail dependence (base)\n"
