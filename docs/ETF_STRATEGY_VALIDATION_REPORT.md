@@ -46,10 +46,33 @@ trend exposure), so combining them does not diversify much.
 | 4. not dependent on a few days/regime | ✅ removing the best 10 days keeps ~2/3 of the return (ex-best-10 52.5% of a 77.5% total) |
 | 5. drawdown within budget | ✅ ~12% base, ~15% conservative |
 | 6/8. beats cash **and a simple passive benchmark at comparable risk** | ❌ **fails vs SPY** — lower absolute return and lower Sharpe; only drawdown is better |
-| 7. survives multiple-testing adjustment (Deflated Sharpe) | ⚠ **not computed** — DSR not yet implemented; ~10-year sample is short |
+| 7. survives multiple-testing adjustment (Deflated Sharpe) | ◑ **computed; passes at scale** — DSR **0.96** at paper_10000/50000 (≥0.95), **0.81 / 0.95** at paper_500 / paper_2500; trend-alone DSR 0.99. But the trial family is narrow (see below), so this is a **lower-bound** deflation, not the full correction |
 
-Five of the gates pass cleanly. The **benchmark gate (6/8) fails**, and the
-statistical-credibility gate (7) is not yet satisfied.
+Six of the eight gates pass. The **benchmark gate (6/8) fails**. Gate 7 is now
+computed and passes for the larger profiles, but with the caveat below.
+
+### Deflated Sharpe (gate 7) detail
+
+DSR = P(true Sharpe > the multiple-testing threshold), after adjusting for
+return skew/kurtosis and track length (Bailey & López de Prado):
+
+| Result | DSR | vs-zero PSR | verdict (0.95) |
+|---|---|---|---|
+| Combined, paper_10000 | 0.96 | 1.00 | PASS |
+| Combined, paper_50000 | 0.96 | 1.00 | PASS |
+| Combined, paper_2500 | 0.95 | 0.99 | borderline |
+| Combined, paper_500 | 0.81 | 0.96 | FAIL (rounding/min-notional drag) |
+| Trend alone, paper_10000 | 0.99 | 1.00 | PASS |
+
+**What this does and does not say.** It says the ETF edge at $10k+ is unlikely to
+be pure luck-under-multiple-testing *within this run* — a modestly encouraging
+signal that the Sharpe is not noise. It does **not** rescue the benchmark
+failure. And the deflation is **optimistic**: the trial family here is only the
+12 profile×scenario variants of one strategy — highly correlated, low-variance,
+so a lenient threshold (~0.28 annual Sharpe). The honest multiple-testing count
+should include the whole research program (fib, ORB, sweep and their variants),
+which would raise the bar. Treat gate 7 as **provisionally passed at scale, not
+conclusively.**
 
 ## 4. Why this sample is the wrong test for trend
 
@@ -76,8 +99,10 @@ Concretely:
 2. **Get the decisive data.** Procure a secondary long-history adjusted daily
    source (Tiingo/Stooq/Norgate) covering 2000–02 and 2008–09, used for research
    only, before any allocation decision. That is the test that matters for trend.
-3. **Implement the missing judge.** Add Deflated Sharpe / multiple-testing
-   adjustment (gate 7) before treating any Sharpe here as significant.
+3. **Deflated Sharpe is now implemented** (`portfolio/research_stats.py`) and the
+   result passes at $10k+ within this run — but on a narrow, correlated trial
+   family. Before trusting it, widen the trial count to the whole research
+   program (fib/ORB/sweep + variants) so the multiple-testing bar is honest.
 4. **Optional, safe:** run both in **shadow paper** (no capital) so live-vs-backtest
    divergence can be tracked via the portfolio Command Centre while the above is
    sorted. Shadow mode allocates nothing.

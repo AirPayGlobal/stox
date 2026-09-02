@@ -92,7 +92,8 @@ _RECORDS: list[StrategyRecord] = [
             "Backtested on real bars 2016-2026: positive after costs (base ~5.6% CAGR, "
             "Sharpe 0.89, MaxDD ~11%) but does NOT beat SPY buy-and-hold on this sample "
             "(the pre-stated benchmark gate). Sample omits 2008-09 crisis where trend "
-            "earns its edge; Deflated-Sharpe not yet computed. Not advanced to tradeable."
+            "earns its edge. Deflated Sharpe computed: 0.96 at paper_10000/50000 (passes "
+            "at scale, but on a narrow trial family). Not advanced to tradeable."
         ),
         evidence="docs/ETF_STRATEGY_VALIDATION_REPORT.md", data_ready="partial",
         eligible_profiles=("paper_500", "paper_2500", "paper_10000", "paper_50000"),
