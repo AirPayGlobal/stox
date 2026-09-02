@@ -21,6 +21,7 @@ Day trading only: every position is closed by Config.FLATTEN_TIME ET.
 """
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime, time as dtime, timedelta
 from zoneinfo import ZoneInfo
@@ -58,6 +59,7 @@ from trading.broker import (
 )
 from trading.positions import PositionBook
 from trading.risk import RiskManager
+from trading.safeguards import DedupeStore, entry_blocks
 from utils.logger import get_logger
 
 logger = get_logger("engine")
@@ -84,9 +86,14 @@ class TradingEngine:
         self.last_equity: float = 0.0
         # sweep bookkeeping
         self._acted_sweeps: set[str] = set()          # candle dedupe keys
-        self._acted_fib: set[str] = set()             # fib setup dedupe keys
+        # fib dedupe persists across restarts so a signal already traded today
+        # is not re-fired after a container restart (in-memory set starts empty).
+        self._acted_fib = DedupeStore(os.path.join(Config.STATE_DIR, "fib_acted.json"))
         self.pending: dict[str, dict] = {}            # underlying -> retrace setup
         self.unmanaged_stock: dict[str, dict] = {}    # broker share positions (warning)
+        self._inflight_orders: set[str] = set()       # submitted, awaiting confirmation
+        self._recon_mismatch = False                  # set when reconcile adopts/closes drift
+        self._entry_guards: dict[str, str] = {}       # active hard blocks (dashboard)
         self._daily_atr_cache: dict[str, tuple] = {}  # underlying -> (date, atr)
         self._dd = {"peak": 0.0, "current": 0.0, "drawdown": 0.0}
         self._dd_state = "OK"                         # OK | REDUCED | HALTED
@@ -132,10 +139,13 @@ class TradingEngine:
         """
         broker_positions = get_option_positions()
         known = {t.symbol for t in self.book.open_trades}
+        # A clean reconcile clears the mismatch guard; adopt/EXTERNAL below re-set it.
+        self._recon_mismatch = False
 
         for symbol, pos in broker_positions.items():
             if symbol in known:
                 continue
+            self._recon_mismatch = True
             strike, opt_type = _parse_occ(symbol)
             if strike is None:
                 logger.warning(f"Unrecognized option symbol at broker: {symbol}")
@@ -153,6 +163,7 @@ class TradingEngine:
 
         for trade in list(self.book.open_trades):
             if trade.symbol not in broker_positions:
+                self._recon_mismatch = True
                 mark = get_option_mid(trade.symbol) or trade.entry_premium
                 self.book.close(trade.symbol, mark, "EXTERNAL")
                 logger.warning(
@@ -333,9 +344,44 @@ class TradingEngine:
                 f"(give-back ${dd:,.0f} from peak ${self._dd['peak']:,.0f})"
             )
 
+    def _data_age_seconds(self) -> float | None:
+        """Age of the freshest intraday bar across the underlyings, in seconds.
+        None if no bars are available (treated as 'unknown', not stale)."""
+        newest = None
+        for underlying in Config.UNDERLYINGS:
+            try:
+                bars = get_today_bars(underlying)
+            except Exception:
+                continue
+            if bars is None or bars.empty:
+                continue
+            ts = bars.index[-1].to_pydatetime()
+            newest = ts if newest is None else max(newest, ts)
+        if newest is None:
+            return None
+        return (datetime.now(ET) - newest).total_seconds()
+
+    def compute_entry_guards(self) -> dict[str, str]:
+        """Recompute active hard blocks on entries and cache for the dashboard."""
+        self._entry_guards = entry_blocks(
+            data_age_seconds=self._data_age_seconds(),
+            max_age_seconds=Config.MAX_QUOTE_AGE_SECONDS,
+            unmanaged_shares=self.unmanaged_stock,
+            block_on_shares=Config.BLOCK_ON_UNMANAGED_SHARES,
+            recon_mismatch=self._recon_mismatch,
+            block_on_recon=Config.BLOCK_ON_RECON_MISMATCH,
+            inflight_orders=self._inflight_orders,
+        )
+        return self._entry_guards
+
     def scan_for_entries(self, equity: float) -> None:
         now_et = datetime.now(ET).time()
         if not (_parse_hhmm(Config.ENTRY_START) <= now_et <= _parse_hhmm(Config.ENTRY_CUTOFF)):
+            return
+
+        guards = self.compute_entry_guards()
+        if guards:
+            logger.info("Entries blocked by safeguards: " + "; ".join(guards.values()))
             return
 
         self._update_drawdown()
@@ -701,15 +747,21 @@ class TradingEngine:
             self.risk.record_open()
             return
 
-        order_id = buy_option(contract.symbol, qty)
-        if order_id:
-            self.book.open(
-                contract.symbol, underlying, direction.value, qty, premium, order_id,
-                strategy=strategy, stop_underlying=stop_underlying,
-                target_underlying=target_underlying,
-                planned_risk=planned_risk, spread_at_entry=spread_at_entry,
-            )
-            self.risk.record_open()
+        # Duplicate-order guard: mark the symbol in-flight across the submit so
+        # a concurrent tick (or a restart mid-submit) can't double-fire it.
+        self._inflight_orders.add(contract.symbol)
+        try:
+            order_id = buy_option(contract.symbol, qty)
+            if order_id:
+                self.book.open(
+                    contract.symbol, underlying, direction.value, qty, premium, order_id,
+                    strategy=strategy, stop_underlying=stop_underlying,
+                    target_underlying=target_underlying,
+                    planned_risk=planned_risk, spread_at_entry=spread_at_entry,
+                )
+                self.risk.record_open()
+        finally:
+            self._inflight_orders.discard(contract.symbol)
 
     # ================================================================= Status
     def status(self) -> dict:
@@ -726,6 +778,7 @@ class TradingEngine:
                          "reduce_at": round(Config.DRAWDOWN_REDUCE_PCT * Config.DRAWDOWN_BASE, 0)},
             "book": self.book.summary(),
             "unmanaged_stock_positions": self.unmanaged_stock,
+            "entry_guards": self._entry_guards,
             "signals": self.last_signals,
             "pending": {
                 u: {

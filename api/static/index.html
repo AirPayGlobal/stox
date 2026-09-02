@@ -193,6 +193,14 @@ async function refresh() {
     warn.style.display = "none";
   }
 
+  const guards = s.entry_guards || {};
+  if (Object.keys(guards).length) {
+    warn.style.display = "block";
+    warn.innerHTML = "🚧 <b>Entries blocked by safeguards</b> (paper-safe — no new " +
+      "positions until cleared):<br>" +
+      Object.entries(guards).map(([k, v]) => `&nbsp;&nbsp;• ${v}`).join("<br>");
+  }
+
   const r = s.risk || {}, b = s.book || {};
   const pnl = r.day_pnl ?? 0, target = r.profit_target ?? 1;
   const pct = Math.min(Math.abs(pnl) / target * 100, 100);
