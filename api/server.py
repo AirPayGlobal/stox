@@ -36,7 +36,7 @@ _lock = threading.Lock()
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 
-APP_VERSION = "2.2.0"
+APP_VERSION = "2.3.0"
 
 
 def _start_engine(dry_run: bool = False) -> tuple[bool, str]:
@@ -126,12 +126,26 @@ def _auth(request: Request) -> str:
 
 @app.get("/healthz")
 def healthz():
-    """Unauthenticated liveness/version probe."""
+    """Unauthenticated liveness/version probe. Also surfaces the non-secret
+    runtime config (strategy, mode, underlyings) so what's actually running can
+    be confirmed without the dashboard login."""
+    from strategy.registry import retired_in
+
+    retired = retired_in(Config.STRATEGY)
     return {
         "ok": True,
         "app": "stox-options",
         "version": APP_VERSION,
         "state_dir": Config.STATE_DIR,  # "/data" = persistent volume in use
+        "strategy": Config.STRATEGY,
+        "mode": Config.ALPACA_MODE,     # "paper" | "live"
+        "underlyings": Config.UNDERLYINGS,
+        "autostart": Config.ENGINE_AUTOSTART,
+        "autostart_dry": Config.ENGINE_AUTOSTART_DRY,
+        # True = running retired strategies on the paper account (forward test);
+        # with mode="live" these are forced signals-only (no real-money orders).
+        "retired_active": retired,
+        "real_money": Config.ALPACA_MODE == "live",
     }
 
 
