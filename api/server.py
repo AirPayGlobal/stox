@@ -58,7 +58,7 @@ def _autostart() -> None:
     retired (all current single strategies are), boot SIGNALS-ONLY so the
     dashboard still works but no orders are placed until a validated strategy
     or portfolio is selected."""
-    from strategy.registry import is_retired
+    from strategy.registry import retired_in
 
     if not Config.ENGINE_AUTOSTART:
         logger.info("ENGINE_AUTOSTART=false — waiting for manual start")
@@ -67,14 +67,21 @@ def _autostart() -> None:
         logger.warning("Autostart skipped: Alpaca API keys not configured")
         return
     dry = Config.ENGINE_AUTOSTART_DRY
-    if is_retired(Config.STRATEGY):
+    retired = retired_in(Config.STRATEGY)
+    real_money = Config.ALPACA_MODE == "live"
+    if retired and real_money:
         logger.warning(
-            f"STRATEGY '{Config.STRATEGY}' is RETIRED — auto-starting SIGNALS-ONLY "
-            f"(no orders). Select a validated strategy/portfolio to trade."
+            f"STRATEGY '{Config.STRATEGY}' includes RETIRED {retired} and ALPACA_MODE=live "
+            f"— auto-starting SIGNALS-ONLY (no real-money orders)."
         )
         dry = True
+    elif retired:
+        logger.warning(
+            f"PAPER forward-test: STRATEGY '{Config.STRATEGY}' includes RETIRED {retired}, "
+            f"trading the PAPER account (real paper fills, NO real money)."
+        )
     ok, msg = _start_engine(dry_run=dry)
-    logger.info(f"Engine autostart: {msg} (dry_run={dry})")
+    logger.info(f"Engine autostart: {msg} (dry_run={dry}, mode={Config.ALPACA_MODE})")
 
 
 def _unauthorized() -> HTTPException:
@@ -149,12 +156,14 @@ def api_trades(_: str = Depends(_auth)):
 
 @app.post("/api/start")
 def api_start(dry_run: bool = False, _: str = Depends(_auth)):
-    from strategy.registry import is_retired
+    from strategy.registry import retired_in
 
-    # A retired strategy may be observed (signals-only) but never live-traded.
-    if not dry_run and is_retired(Config.STRATEGY):
-        msg = (f"STRATEGY '{Config.STRATEGY}' is RETIRED — refusing live start. "
-               f"Use dry_run=true for signals-only, or select a validated strategy.")
+    # A retired strategy may trade on the PAPER account (forward test) but never
+    # with real money (ALPACA_MODE=live).
+    retired = retired_in(Config.STRATEGY)
+    if not dry_run and retired and Config.ALPACA_MODE == "live":
+        msg = (f"STRATEGY '{Config.STRATEGY}' includes RETIRED {retired} and ALPACA_MODE=live "
+               f"— refusing real-money start. Use the paper account, dry_run, or a validated strategy.")
         logger.warning(msg)
         return {"ok": False, "message": msg, "dry_run": dry_run}
     ok, message = _start_engine(dry_run=dry_run)
@@ -282,15 +291,20 @@ def api_compare(
     strategy: str = "",
     days: int = 30,
     equity: float = 100_000.0,
+    scenario: str = "base",
     _: str = Depends(_auth),
 ):
-    """Live-vs-backtest drift for one strategy over the same window: run the
-    same strategy through the backtester and lay its (upper-bound) stats beside
-    the live trade record, then classify the drift. This is the check that
-    exposed sweep — a strong backtest that bled once real spreads bit."""
+    """Live-vs-backtest drift for a strategy over the same window: run the same
+    strategy through the backtester and lay its stats beside the live trade
+    record, then classify the drift. This is the check that exposed sweep — a
+    strong backtest that bled once real spreads bit. `scenario` defaults to
+    'base' (realistic fills) so live is compared against a realistic backtest,
+    not the upper bound. 'positive' compares the orb+sweep+fib combo."""
     strategy = strategy or Config.STRATEGY
-    if strategy not in ("orb", "sweep", "swing", "fib"):
+    if strategy not in ("orb", "sweep", "swing", "fib", "positive"):
         return {"error": f"unknown strategy '{strategy}'"}
+    if scenario not in ("baseline", "base", "conservative"):
+        return {"error": f"unknown scenario '{scenario}'"}
     days = max(5, min(days, 365))
     from reporting import live_vs_backtest, strategy_live_stats
 
@@ -298,8 +312,9 @@ def api_compare(
     from backtest.run_backtest import run_backtest
 
     try:
-        res = run_backtest(Config.UNDERLYINGS, days, equity, strategy)
-        backtest = res["strategies"].get(strategy, {"trades": 0})
+        res = run_backtest(Config.UNDERLYINGS, days, equity, strategy, scenario)
+        backtest = (res["combined"] if strategy == "positive"
+                    else res["strategies"].get(strategy, {"trades": 0}))
     except Exception as exc:
         logger.error(f"Compare backtest failed: {exc}", exc_info=True)
         return {"error": str(exc)}
@@ -307,6 +322,7 @@ def api_compare(
         "strategy": strategy,
         "days": days,
         "equity": equity,
+        "scenario": scenario,
         **live_vs_backtest(live, backtest),
     }
 

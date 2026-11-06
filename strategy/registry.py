@@ -115,6 +115,25 @@ _RECORDS: list[StrategyRecord] = [
 REGISTRY: dict[str, StrategyRecord] = {r.id: r for r in _RECORDS}
 
 
+def resolve_strategy_ids(strategy: str) -> list[str]:
+    """Expand a STRATEGY config value into its component strategy ids."""
+    s = (strategy or "").lower()
+    if s == "both":
+        return ["orb", "sweep"]
+    if s == "all":
+        return ["orb", "sweep", "swing", "fib"]
+    if s == "positive":          # the backtest-positive intraday set, swing dropped
+        return ["orb", "sweep", "fib"]
+    if "," in s:
+        return [x.strip() for x in s.split(",") if x.strip()]
+    return [s]
+
+
+def retired_in(strategy: str) -> list[str]:
+    """Which component strategies of a STRATEGY value are retired (if any)."""
+    return [sid for sid in resolve_strategy_ids(strategy) if is_retired(sid)]
+
+
 def get(strategy_id: str) -> StrategyRecord | None:
     return REGISTRY.get(strategy_id)
 

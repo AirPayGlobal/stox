@@ -60,6 +60,7 @@ from trading.broker import (
 from trading.positions import PositionBook
 from trading.risk import RiskManager
 from trading.safeguards import DedupeStore, entry_blocks
+from strategy.registry import resolve_strategy_ids
 from utils.logger import get_logger
 
 logger = get_logger("engine")
@@ -399,11 +400,12 @@ class TradingEngine:
                 logger.info(f"Not scanning further: {why}")
                 return
 
-            if Config.STRATEGY in ("orb", "both"):
+            active = resolve_strategy_ids(Config.STRATEGY)
+            if "orb" in active:
                 self._scan_orb(underlying, equity)
-            if Config.STRATEGY in ("sweep", "both"):
+            if "sweep" in active:
                 self._scan_sweep(underlying, equity)
-            if Config.STRATEGY == "fib":
+            if "fib" in active:
                 self._scan_fib(underlying, equity)
 
     def _entry_blocked(self, underlying: str) -> str | None:

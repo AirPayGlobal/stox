@@ -8,9 +8,24 @@ from strategy.registry import (
     get,
     is_retired,
     is_tradeable,
+    resolve_strategy_ids,
     retired,
+    retired_in,
     tradeable,
 )
+
+
+def test_resolve_strategy_ids():
+    assert resolve_strategy_ids("positive") == ["orb", "sweep", "fib"]
+    assert resolve_strategy_ids("both") == ["orb", "sweep"]
+    assert resolve_strategy_ids("fib") == ["fib"]
+    assert resolve_strategy_ids("orb,fib") == ["orb", "fib"]
+
+
+def test_retired_in_detects_retired_components():
+    assert set(retired_in("positive")) == {"orb", "sweep", "fib"}   # all retired
+    assert retired_in("ETF_TREND_V1") == []                          # registered, not retired
+    assert retired_in("orb,ETF_TREND_V1") == ["orb"]                 # mixed
 
 
 def test_legacy_option_strategies_are_retired():
