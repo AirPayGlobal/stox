@@ -79,12 +79,31 @@ def _session_times() -> tuple[dtime, dtime, dtime]:
     )
 
 
+# Execution scenario for the simulated fills. "baseline" reproduces the fixed
+# SPREAD_COST half-spread (the dashboard's long-standing upper-bound assumption);
+# "base"/"conservative" apply the realistic spread/slippage model from
+# backtest.execution so a result is not flattered by an unrealistic fill. Set by
+# run_backtest(); module-global because the per-day sims are single-threaded.
+_SCENARIO = "baseline"
+
+
+def _friction(mid: float) -> float:
+    """Adverse $/share paid vs the mid for the active execution scenario."""
+    from backtest.execution import get_scenario, modelled_spread
+    sc = get_scenario(_SCENARIO)
+    if sc.fixed_half_spread is not None:
+        return sc.fixed_half_spread
+    spread = modelled_spread(mid, sc)
+    return sc.cross * (spread / 2) + sc.slippage_abs
+
+
 def _open_synthetic(symbol, ts, direction, spot, iv, equity, stop_ul=None, target_ul=None):
     """Price a synthetic ATM-ish contract and size it. Returns trade or None."""
     opt_type = "call" if direction == Signal.LONG else "put"
     strike = math.ceil(spot) if opt_type == "call" else math.floor(spot)
     t = t_to_expiry_years(ts)
-    entry = bs_price(spot, strike, t, iv, opt_type) + SPREAD_COST
+    mid = bs_price(spot, strike, t, iv, opt_type)
+    entry = mid + _friction(mid)
     if entry < 0.10:
         return None
 
@@ -122,7 +141,7 @@ def _open_synthetic(symbol, ts, direction, spot, iv, equity, stop_ul=None, targe
 
 def _close_synthetic(trade, spot, ts, iv, reason):
     mark = bs_price(spot, trade["strike"], t_to_expiry_years(ts), iv, trade["type"])
-    exit_premium = max(mark - SPREAD_COST, 0.01)
+    exit_premium = max(mark - _friction(mark), 0.01)
     trade["pnl"] = (exit_premium - trade["entry"]) * 100 * trade["qty"]
     trade["exit_reason"] = reason
     return trade
@@ -364,6 +383,10 @@ def _resolve_strategies(strategy: str) -> list[str]:
         return ["orb", "sweep"]
     if strategy == "all":
         return ["orb", "sweep", "swing", "fib"]
+    if strategy == "positive":
+        return ["orb", "sweep", "fib"]   # the backtest-positive set, swing dropped
+    if "," in strategy:
+        return [s.strip() for s in strategy.split(",") if s.strip()]
     return [strategy]
 
 
@@ -391,9 +414,20 @@ def _stats(trades: list[dict]) -> dict:
     return out
 
 
-def run_backtest(symbols: list[str], days: int, equity: float, strategy: str) -> dict:
-    """Run the simulation and return a JSON-safe results dict."""
+def run_backtest(symbols: list[str], days: int, equity: float, strategy: str,
+                 scenario: str = "baseline") -> dict:
+    """Run the simulation and return a JSON-safe results dict.
+
+    `scenario` selects the execution model: "baseline" keeps the long-standing
+    fixed half-spread (upper bound), while "base"/"conservative" apply realistic
+    spread + slippage so the result reflects real fills, not an optimistic one.
+    """
+    from backtest.execution import get_scenario
     from backtest.swing import simulate_swing
+
+    global _SCENARIO
+    get_scenario(scenario)   # validate
+    _SCENARIO = scenario
 
     strategies = _resolve_strategies(strategy)
     by_strategy: dict[str, list[dict]] = {s: [] for s in strategies}
@@ -446,11 +480,14 @@ def run_backtest(symbols: list[str], days: int, equity: float, strategy: str) ->
                 for day, day_bars in fib_bars.groupby(fib_bars.index.date):
                     by_strategy["fib"] += simulate_day_fib(symbol, day_bars, equity)
 
+    combined_trades = [t for ts in by_strategy.values() for t in ts]
     return {
         "symbols": symbols,
         "days_requested": days,
         "equity": equity,
+        "scenario": scenario,
         "daily_profit_target": Config.DAILY_PROFIT_TARGET,
+        "combined": _stats(combined_trades) if combined_trades else {"trades": 0},
         "strategies": {
             s: (_stats(trades) if trades else {"trades": 0})
             for s, trades in by_strategy.items()
@@ -492,12 +529,23 @@ def main() -> None:
     parser.add_argument("--equity", type=float, default=100_000)
     parser.add_argument(
         "--strategy",
-        choices=["orb", "sweep", "swing", "fib", "both", "all"],
+        choices=["orb", "sweep", "swing", "fib", "both", "all", "positive"],
         default=Config.STRATEGY,
+    )
+    parser.add_argument(
+        "--scenario", choices=["baseline", "base", "conservative"], default="baseline",
+        help="execution model: baseline=fixed spread (upper bound); base/conservative=realistic",
     )
     args = parser.parse_args()
     symbols = [s.upper() for s in args.symbols] or Config.UNDERLYINGS
-    print_results(run_backtest(symbols, args.days, args.equity, args.strategy))
+    res = run_backtest(symbols, args.days, args.equity, args.strategy, args.scenario)
+    print_results(res)
+    c = res.get("combined", {})
+    if c.get("trades"):
+        print(f"\n--- COMBINED ({res['scenario']}) ---")
+        print(f"Trades           : {c['trades']}")
+        print(f"Total P&L        : ${c['total_pnl']:+,.0f}")
+        print(f"Win rate         : {c['win_rate']:.0%}")
 
 
 if __name__ == "__main__":

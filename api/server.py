@@ -254,18 +254,24 @@ def api_backtest(
     days: int = 30,
     equity: float = 100_000.0,
     symbols: str = "",
+    scenario: str = "baseline",
     _: str = Depends(_auth),
 ):
     """Run a backtest server-side and return the results summary. Synchronous:
-    expect a few seconds per symbol (data fetch + simulation)."""
-    if strategy not in ("orb", "sweep", "swing", "fib", "both", "all"):
+    expect a few seconds per symbol (data fetch + simulation).
+
+    `scenario`: "baseline" = fixed-spread upper bound (default, unchanged);
+    "base"/"conservative" = realistic spread+slippage fills."""
+    if strategy not in ("orb", "sweep", "swing", "fib", "both", "all", "positive"):
         return {"error": f"unknown strategy '{strategy}'"}
+    if scenario not in ("baseline", "base", "conservative"):
+        return {"error": f"unknown scenario '{scenario}'"}
     days = max(5, min(days, 365))
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] or Config.UNDERLYINGS
     from backtest.run_backtest import run_backtest
 
     try:
-        return run_backtest(syms, days, equity, strategy)
+        return run_backtest(syms, days, equity, strategy, scenario)
     except Exception as exc:
         logger.error(f"Backtest failed: {exc}", exc_info=True)
         return {"error": str(exc)}
