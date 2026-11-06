@@ -91,11 +91,17 @@
   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center">
     <select id="bt-strategy">
       <option value="fib">fib (gold-zone pullback)</option>
+      <option value="positive">positive (orb + sweep + fib, no swing)</option>
       <option value="all">all (orb + sweep + swing + fib)</option>
       <option value="both">both (orb + sweep)</option>
       <option value="orb">orb</option>
       <option value="sweep">sweep</option>
       <option value="swing">swing (multi-day 4H)</option>
+    </select>
+    <select id="bt-scenario" title="execution model">
+      <option value="baseline">baseline fills (upper bound)</option>
+      <option value="base">base fills (realistic)</option>
+      <option value="conservative">conservative fills (stress)</option>
     </select>
     <input id="bt-days" type="number" value="60" min="5" max="365" title="days"> days
     <input id="bt-equity" type="number" value="100000" step="10000" title="equity"> equity
@@ -193,6 +199,14 @@ async function refresh() {
     warn.style.display = "none";
   }
 
+  const guards = s.entry_guards || {};
+  if (Object.keys(guards).length) {
+    warn.style.display = "block";
+    warn.innerHTML = "🚧 <b>Entries blocked by safeguards</b> (paper-safe — no new " +
+      "positions until cleared):<br>" +
+      Object.entries(guards).map(([k, v]) => `&nbsp;&nbsp;• ${v}`).join("<br>");
+  }
+
   const r = s.risk || {}, b = s.book || {};
   const pnl = r.day_pnl ?? 0, target = r.profit_target ?? 1;
   const pct = Math.min(Math.abs(pnl) / target * 100, 100);
@@ -246,6 +260,7 @@ async function runBacktest() {
   const btn = document.getElementById("bt-run"), st = document.getElementById("bt-status");
   const params = new URLSearchParams({
     strategy: document.getElementById("bt-strategy").value,
+    scenario: document.getElementById("bt-scenario").value,
     days: document.getElementById("bt-days").value,
     equity: document.getElementById("bt-equity").value,
     symbols: document.getElementById("bt-symbols").value,
@@ -256,8 +271,19 @@ async function runBacktest() {
   try {
     const res = await (await fetch("/api/backtest?" + params, {method: "POST"})).json();
     if (res.error) { st.textContent = "error: " + res.error; return; }
-    st.textContent = `${res.symbols.join(", ")} · ${res.days_requested} days · $${fmt(res.equity,0)}`;
+    st.textContent = `${res.symbols.join(", ")} · ${res.days_requested} days · $${fmt(res.equity,0)} · ${res.scenario || "baseline"} fills`;
     let html = "";
+    const cmb = res.combined;
+    if (cmb && cmb.trades) {
+      const scen = res.scenario || "baseline";
+      const note = scen === "baseline"
+        ? "⚠ baseline = fixed-spread UPPER BOUND. Switch to base/conservative for realistic fills."
+        : "realistic-fill estimate (base/conservative execution model).";
+      html += `<div style="padding:10px;border:1px solid #30363d;border-radius:8px;margin-bottom:10px">
+        <b>COMBINED (${scen})</b> &nbsp; ${cmb.trades} trades · ${fmt(cmb.win_rate*100,0)}% win &nbsp;
+        <span class="${cmb.total_pnl >= 0 ? "pos" : "neg"}" style="font-size:18px">${money(cmb.total_pnl)}</span>
+        <div style="color:#8b949e;font-size:12px;margin-top:4px">${note}</div></div>`;
+    }
     for (const [name, s] of Object.entries(res.strategies)) {
       if (!s.trades) { html += `<h2>${name}: no trades</h2>`; continue; }
       html += `<h2>${name}</h2><table><thead><tr>

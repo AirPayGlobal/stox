@@ -184,8 +184,9 @@ def strategy_live_stats(book: PositionBook, strategy: str, days: int) -> dict:
     """Live trade stats for one strategy over the trailing window, in the SAME
     field shape the backtester's `_stats` emits, so the two can be laid side by
     side. `expectancy` (P&L per trade) is added to both sides for comparison."""
+    want = {"orb", "sweep", "fib"} if strategy == "positive" else {strategy}
     trades = [
-        t for t in trades_since(book, days) if (t.strategy or "orb") == strategy
+        t for t in trades_since(book, days) if (t.strategy or "orb") in want
     ]
     if not trades:
         return {"trades": 0}

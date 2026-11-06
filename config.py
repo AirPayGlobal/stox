@@ -141,6 +141,37 @@ class Config:
     FIB_MAX_STOP_PCT: float = _f("FIB_MAX_STOP_PCT", 0.012)   # ~ $6.6 on SPY
     FIB_MAX_HOLD_MINUTES: int = _i("FIB_MAX_HOLD_MINUTES", 45)  # time stop (0 = off)
 
+    # ------------------------------------------------------------ Fib validation harness
+    # PAPER/BACKTEST ONLY — none of these change how live orders are placed.
+    # They exist to test whether the fib backtest edge survives realistic
+    # execution friction and full production constraints.
+    STRATEGY_VERSION: str = os.getenv("STRATEGY_VERSION", "fib-2.0")
+    # Entry-scan cadence in BARS, for backtest/engine parity. The live engine
+    # scans every SCAN_SECONDS (300s = 5 x 1-min bars); the backtester must use
+    # the same cadence or it overcounts touches that live never sees.
+    FIB_SCAN_BARS: int = _i("FIB_SCAN_BARS", 5)
+    # Execution scenario for the simulator: baseline | optimistic | base |
+    # conservative | mid. "baseline" reproduces the old fixed $0.02 half-spread
+    # (kept for comparison); "mid" fills at mid-price and is DIAGNOSTIC ONLY.
+    EXEC_SCENARIO: str = os.getenv("EXEC_SCENARIO", "base").lower()
+    # Optional selectivity filters — ALL DEFAULT OFF. Enable only after a filter
+    # demonstrably improves out-of-sample expectancy (see docs/FIB_VALIDATION_REPORT.md).
+    FIB_FILTER_TREND: bool = _b("FIB_FILTER_TREND", False)      # entry aligned with EMA trend
+    FIB_TREND_EMA: int = _i("FIB_TREND_EMA", 20)
+    FIB_FILTER_VOL_REGIME: bool = _b("FIB_FILTER_VOL_REGIME", False)  # realized-vol band
+    FIB_VOL_MIN: float = _f("FIB_VOL_MIN", 0.0)                 # annualized, e.g. 0.08
+    FIB_VOL_MAX: float = _f("FIB_VOL_MAX", 5.0)
+    FIB_FILTER_TOD: bool = _b("FIB_FILTER_TOD", False)         # time-of-day eligibility
+    FIB_TOD_BLOCK: str = os.getenv("FIB_TOD_BLOCK", "")        # ET window to BLOCK, e.g. 11:30-13:30
+    FIB_FILTER_LIQUIDITY: bool = _b("FIB_FILTER_LIQUIDITY", False)   # tighter entry-spread gate
+    FIB_MAX_ENTRY_SPREAD_PCT: float = _f("FIB_MAX_ENTRY_SPREAD_PCT", 0.08)
+    FIB_FILTER_CONFIRM: bool = _b("FIB_FILTER_CONFIRM", False)  # require a post-touch confirmation bar
+
+    # ---- Operational safeguards (paper + live entry gating) ----
+    MAX_QUOTE_AGE_SECONDS: int = _i("MAX_QUOTE_AGE_SECONDS", 120)  # block entries on staler data
+    BLOCK_ON_UNMANAGED_SHARES: bool = _b("BLOCK_ON_UNMANAGED_SHARES", True)
+    BLOCK_ON_RECON_MISMATCH: bool = _b("BLOCK_ON_RECON_MISMATCH", True)
+
     # ------------------------------------------------------------ ORB entry filters
     # ALL DEFAULT OFF: these are unvalidated against the live track record,
     # which was produced by the unfiltered ORB logic. Test each in isolation

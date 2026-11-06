@@ -52,15 +52,36 @@ def _start_engine(dry_run: bool = False) -> tuple[bool, str]:
 
 @app.on_event("startup")
 def _autostart() -> None:
-    """Default state is RUNNING: start the engine when the server boots."""
+    """Start the engine when the server boots — but NEVER auto-trade a retired
+    strategy. The multi-strategy migration (Phase 0) removes the old
+    single-default-strategy auto-trade path: if the configured STRATEGY is
+    retired (all current single strategies are), boot SIGNALS-ONLY so the
+    dashboard still works but no orders are placed until a validated strategy
+    or portfolio is selected."""
+    from strategy.registry import retired_in
+
     if not Config.ENGINE_AUTOSTART:
         logger.info("ENGINE_AUTOSTART=false — waiting for manual start")
         return
     if not Config.ALPACA_API_KEY or not Config.ALPACA_API_SECRET:
         logger.warning("Autostart skipped: Alpaca API keys not configured")
         return
-    ok, msg = _start_engine(dry_run=Config.ENGINE_AUTOSTART_DRY)
-    logger.info(f"Engine autostart: {msg} (dry_run={Config.ENGINE_AUTOSTART_DRY})")
+    dry = Config.ENGINE_AUTOSTART_DRY
+    retired = retired_in(Config.STRATEGY)
+    real_money = Config.ALPACA_MODE == "live"
+    if retired and real_money:
+        logger.warning(
+            f"STRATEGY '{Config.STRATEGY}' includes RETIRED {retired} and ALPACA_MODE=live "
+            f"— auto-starting SIGNALS-ONLY (no real-money orders)."
+        )
+        dry = True
+    elif retired:
+        logger.warning(
+            f"PAPER forward-test: STRATEGY '{Config.STRATEGY}' includes RETIRED {retired}, "
+            f"trading the PAPER account (real paper fills, NO real money)."
+        )
+    ok, msg = _start_engine(dry_run=dry)
+    logger.info(f"Engine autostart: {msg} (dry_run={dry}, mode={Config.ALPACA_MODE})")
 
 
 def _unauthorized() -> HTTPException:
@@ -135,10 +156,68 @@ def api_trades(_: str = Depends(_auth)):
 
 @app.post("/api/start")
 def api_start(dry_run: bool = False, _: str = Depends(_auth)):
+    from strategy.registry import retired_in
+
+    # A retired strategy may trade on the PAPER account (forward test) but never
+    # with real money (ALPACA_MODE=live).
+    retired = retired_in(Config.STRATEGY)
+    if not dry_run and retired and Config.ALPACA_MODE == "live":
+        msg = (f"STRATEGY '{Config.STRATEGY}' includes RETIRED {retired} and ALPACA_MODE=live "
+               f"— refusing real-money start. Use the paper account, dry_run, or a validated strategy.")
+        logger.warning(msg)
+        return {"ok": False, "message": msg, "dry_run": dry_run}
     ok, message = _start_engine(dry_run=dry_run)
     if ok:
         logger.info(f"Engine started via API (dry_run={dry_run})")
     return {"ok": ok, "message": message, "dry_run": dry_run}
+
+
+@app.get("/api/strategies")
+def api_strategies(_: str = Depends(_auth)):
+    """Strategy registry (lifecycle, retirement reasons, data readiness) — feeds
+    the Strategy Registry UI."""
+    from strategy.registry import as_dicts
+
+    return {"strategies": as_dicts()}
+
+
+# ---- Multi-strategy UI/API contracts (blueprint §8; PAPER-only) ----
+@app.get("/api/portfolio/profiles")
+def api_portfolio_profiles(_: str = Depends(_auth)):
+    from portfolio.contracts import profiles_contract
+
+    return profiles_contract()
+
+
+@app.get("/api/portfolio/command-centre")
+def api_command_centre(profile: str = "paper_10000", _: str = Depends(_auth)):
+    from portfolio.contracts import command_centre
+
+    try:
+        return command_centre(profile)
+    except ValueError as exc:
+        return {"error": str(exc)}
+
+
+@app.get("/api/portfolio/registry")
+def api_portfolio_registry(_: str = Depends(_auth)):
+    from portfolio.contracts import strategy_registry_contract
+
+    return strategy_registry_contract()
+
+
+@app.get("/api/portfolio/lab")
+def api_portfolio_lab(_: str = Depends(_auth)):
+    from portfolio.contracts import portfolio_lab_contract
+
+    return portfolio_lab_contract()
+
+
+@app.get("/api/research/leaderboard")
+def api_research_leaderboard(_: str = Depends(_auth)):
+    from portfolio.contracts import research_leaderboard_contract
+
+    return research_leaderboard_contract()
 
 
 def _book():
@@ -184,18 +263,24 @@ def api_backtest(
     days: int = 30,
     equity: float = 100_000.0,
     symbols: str = "",
+    scenario: str = "baseline",
     _: str = Depends(_auth),
 ):
     """Run a backtest server-side and return the results summary. Synchronous:
-    expect a few seconds per symbol (data fetch + simulation)."""
-    if strategy not in ("orb", "sweep", "swing", "fib", "both", "all"):
+    expect a few seconds per symbol (data fetch + simulation).
+
+    `scenario`: "baseline" = fixed-spread upper bound (default, unchanged);
+    "base"/"conservative" = realistic spread+slippage fills."""
+    if strategy not in ("orb", "sweep", "swing", "fib", "both", "all", "positive"):
         return {"error": f"unknown strategy '{strategy}'"}
+    if scenario not in ("baseline", "base", "conservative"):
+        return {"error": f"unknown scenario '{scenario}'"}
     days = max(5, min(days, 365))
     syms = [s.strip().upper() for s in symbols.split(",") if s.strip()] or Config.UNDERLYINGS
     from backtest.run_backtest import run_backtest
 
     try:
-        return run_backtest(syms, days, equity, strategy)
+        return run_backtest(syms, days, equity, strategy, scenario)
     except Exception as exc:
         logger.error(f"Backtest failed: {exc}", exc_info=True)
         return {"error": str(exc)}
@@ -206,15 +291,20 @@ def api_compare(
     strategy: str = "",
     days: int = 30,
     equity: float = 100_000.0,
+    scenario: str = "base",
     _: str = Depends(_auth),
 ):
-    """Live-vs-backtest drift for one strategy over the same window: run the
-    same strategy through the backtester and lay its (upper-bound) stats beside
-    the live trade record, then classify the drift. This is the check that
-    exposed sweep — a strong backtest that bled once real spreads bit."""
+    """Live-vs-backtest drift for a strategy over the same window: run the same
+    strategy through the backtester and lay its stats beside the live trade
+    record, then classify the drift. This is the check that exposed sweep — a
+    strong backtest that bled once real spreads bit. `scenario` defaults to
+    'base' (realistic fills) so live is compared against a realistic backtest,
+    not the upper bound. 'positive' compares the orb+sweep+fib combo."""
     strategy = strategy or Config.STRATEGY
-    if strategy not in ("orb", "sweep", "swing", "fib"):
+    if strategy not in ("orb", "sweep", "swing", "fib", "positive"):
         return {"error": f"unknown strategy '{strategy}'"}
+    if scenario not in ("baseline", "base", "conservative"):
+        return {"error": f"unknown scenario '{scenario}'"}
     days = max(5, min(days, 365))
     from reporting import live_vs_backtest, strategy_live_stats
 
@@ -222,8 +312,9 @@ def api_compare(
     from backtest.run_backtest import run_backtest
 
     try:
-        res = run_backtest(Config.UNDERLYINGS, days, equity, strategy)
-        backtest = res["strategies"].get(strategy, {"trades": 0})
+        res = run_backtest(Config.UNDERLYINGS, days, equity, strategy, scenario)
+        backtest = (res["combined"] if strategy == "positive"
+                    else res["strategies"].get(strategy, {"trades": 0}))
     except Exception as exc:
         logger.error(f"Compare backtest failed: {exc}", exc_info=True)
         return {"error": str(exc)}
@@ -231,6 +322,7 @@ def api_compare(
         "strategy": strategy,
         "days": days,
         "equity": equity,
+        "scenario": scenario,
         **live_vs_backtest(live, backtest),
     }
 
